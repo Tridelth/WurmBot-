@@ -1,23 +1,5 @@
 package net.ildar.wurm;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.net.MalformedURLException;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Map;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.BiPredicate;
-import java.util.function.Predicate;
-import java.util.regex.Pattern;
-
-import org.gotti.wurmunlimited.modloader.ReflectionUtil;
-import org.gotti.wurmunlimited.modloader.classhooks.HookManager;
-
 import com.wurmonline.client.comm.ServerConnectionListenerClass;
 import com.wurmonline.client.game.PlayerObj;
 import com.wurmonline.client.game.SkillLogicSet;
@@ -26,115 +8,118 @@ import com.wurmonline.client.game.inventory.InventoryMetaItem;
 import com.wurmonline.client.renderer.CreatureData;
 import com.wurmonline.client.renderer.cell.CellRenderable;
 import com.wurmonline.client.renderer.cell.CreatureCellRenderable;
+import com.wurmonline.client.renderer.gui.HeadsUpDisplay;
 import com.wurmonline.client.renderer.gui.InventoryListComponent;
-import com.wurmonline.client.renderer.gui.InventoryWindow;
-import com.wurmonline.client.renderer.gui.ItemListWindow;
 import com.wurmonline.client.renderer.gui.MindLogicCalculator;
 import com.wurmonline.client.renderer.gui.PaperDollInventory;
 import com.wurmonline.client.renderer.gui.PaperDollSlot;
 import com.wurmonline.client.renderer.gui.WurmComponent;
 import com.wurmonline.client.renderer.gui.WurmTreeList;
+import java.lang.reflect.Method;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
+import java.util.regex.Pattern;
+import org.gotti.wurmunlimited.modloader.ReflectionUtil;
+import org.gotti.wurmunlimited.modloader.classhooks.HookManager;
 
 public class Utils {
-    //used to synchronize server calls
-    @SuppressWarnings("unused")
     public static ReentrantLock serverCallLock = new ReentrantLock();
-    //console messages queue
+
     public static Queue<String> consoleMessages = new ConcurrentLinkedQueue<>();
-    /**
-     * Print the message to the console
-     */
+
+    private static final float maxActionSqDistance = 25.0F;
+
     public static void consolePrint(String fmt, Object... args) {
         if (fmt == null)
             return;
-        
-        fmt = args.length == 0 ? fmt : String.format(fmt, args);
-        for(String line: fmt.split("\n"))
+        fmt = (args.length == 0) ? fmt : String.format(fmt, args);
+        for (String line : fmt.split("\n"))
             consoleMessages.add(line);
     }
 
     public static void showOnScreenMessage(String message) {
-        showOnScreenMessage(message, 1, 1, 1);
+        showOnScreenMessage(message, 1.0F, 1.0F, 1.0F);
     }
+
     public static void showOnScreenMessage(String message, float r, float g, float b) {
         WurmHelper.hud.addOnscreenMessage(message, r, g, b, (byte)1);
-        consolePrint(message);
+        consolePrint(message, new Object[0]);
     }
-    
+
     public static <Cls, Ret> Ret getField(Cls what, String field) throws IllegalAccessException, NoSuchFieldException {
-        return ReflectionUtil.getPrivateField(what, ReflectionUtil.getField(what.getClass(), field));
+        return (Ret)ReflectionUtil.getPrivateField(what, ReflectionUtil.getField(what.getClass(), field));
     }
-    
+
     public static <Cls, Field> void setField(Cls what, String field, Field value) throws IllegalAccessException, NoSuchFieldException {
         ReflectionUtil.setPrivateField(what, ReflectionUtil.getField(what.getClass(), field), value);
     }
 
-    /**
-     * Turn player by specified angle
-     * @param dxRot angle in degrees
-     */
     public static void turnPlayer(float dxRot) {
-        try{
-            final PlayerObj ply = WurmHelper.hud.getWorld().getPlayer();
-            float xRot = getField(ply, "xRotUsed");
-            xRot = (xRot + dxRot)%360;
-            if (xRot < 0 ) xRot = (xRot + 360)%360;
-            setField(ply, "xRotUsed", xRot);
+        try {
+            PlayerObj ply = WurmHelper.hud.getWorld().getPlayer();
+            float xRot = ((Float)getField(ply, "xRotUsed")).floatValue();
+            xRot = (xRot + dxRot) % 360.0F;
+            if (xRot < 0.0F)
+                xRot = (xRot + 360.0F) % 360.0F;
+            setField(ply, "xRotUsed", Float.valueOf(xRot));
         } catch (Exception e) {
-            consolePrint("Unexpected error while turning - " + e.getMessage());
+            consolePrint("Unexpected error while turning - " + e.getMessage(), new Object[0]);
         }
     }
 
-    /**
-     * Turn player at exact angle.
-     * @param xRot the horizontal angle. Between 0 and 359, clockwise, 0 is north
-     * @param yRot the vertical angle, 0 is center, 90 is bottom, -90 is top
-     */
     public static void turnPlayer(float xRot, float yRot) {
-        try{
-            final PlayerObj ply = WurmHelper.hud.getWorld().getPlayer();
-            if(!Float.isNaN(xRot)) setField(ply, "xRotUsed", xRot);
-            if(!Float.isNaN(yRot)) setField(ply, "yRotUsed", yRot);
+        try {
+            PlayerObj ply = WurmHelper.hud.getWorld().getPlayer();
+            if (!Float.isNaN(xRot))
+                setField(ply, "xRotUsed", Float.valueOf(xRot));
+            if (!Float.isNaN(yRot))
+                setField(ply, "yRotUsed", Float.valueOf(yRot));
         } catch (Exception e) {
-            consolePrint("Unexpected error while turning - " + e.getMessage());
+            consolePrint("Unexpected error while turning - " + e.getMessage(), new Object[0]);
         }
     }
 
-    /**
-     * Move player at specified distance in current direction
-     * @param d distance in meters
-     */
     public static void movePlayer(float d) {
-        try{
+        try {
             float x = WurmHelper.hud.getWorld().getPlayerPosX();
             float y = WurmHelper.hud.getWorld().getPlayerPosY();
-            float xr = getField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed");
-            float dx = (float)(d*Math.sin((double)xr/180*Math.PI));
-            float dy = (float)(-d*Math.cos((double)xr/180*Math.PI));
-            movePlayer(x+dx, y+dy);
+            float xr = ((Float)getField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed")).floatValue();
+            float dx = (float)(d * Math.sin(xr / 180.0D * Math.PI));
+            float dy = (float)(-d * Math.cos(xr / 180.0D * Math.PI));
+            movePlayer(x + dx, y + dy);
         } catch (Exception e) {
-            consolePrint("Unexpected error while moving - " + e.getMessage());
-            consolePrint( e.toString());
+            consolePrint("Unexpected error while moving - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
     }
 
-    public static void movePlayerBySteps(float d, int steps, long duration) throws InterruptedException{
-        try{
+    public static void movePlayerBySteps(float d, int steps, long duration) throws InterruptedException {
+        try {
             float x = WurmHelper.hud.getWorld().getPlayerPosX();
             float y = WurmHelper.hud.getWorld().getPlayerPosY();
-            float xr = getField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed");
-            float dx = (float)(d*Math.sin((double)xr/180*Math.PI));
-            float dy = (float)(-d*Math.cos((double)xr/180*Math.PI));
-            movePlayerBySteps(x+dx, y+dy, steps, duration);
+            float xr = ((Float)getField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed")).floatValue();
+            float dx = (float)(d * Math.sin(xr / 180.0D * Math.PI));
+            float dy = (float)(-d * Math.cos(xr / 180.0D * Math.PI));
+            movePlayerBySteps(x + dx, y + dy, steps, duration);
         } catch (InterruptedException e) {
             throw e;
         } catch (Exception e) {
-            consolePrint("Unexpected error while moving - " + e.getMessage());
-            consolePrint( e.toString());
+            consolePrint("Unexpected error while moving - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
     }
 
-    public static void movePlayerBySteps(float x, float y, int steps, long duration) throws InterruptedException{
+    public static void movePlayerBySteps(float x, float y, int steps, long duration) throws InterruptedException {
         float curX = WurmHelper.hud.getWorld().getPlayerPosX();
         float curY = WurmHelper.hud.getWorld().getPlayerPosY();
         float xStep = (x - curX) / steps;
@@ -146,57 +131,50 @@ public class Utils {
     }
 
     public static void movePlayer(float x, float y) {
-        try{
+        try {
+            float z;
             World world = WurmHelper.hud.getWorld();
             PlayerObj ply = world.getPlayer();
-            setField(ply, "xPosUsed", x);
-            setField(ply, "yPosUsed", y);
-            
-            float z;
-            if(ply.getLayer() >= 0)
-                z = Math.max(-1, world.getNearTerrainBuffer().getInterpolatedHeight(x, y));
-            else
-                z = Math.min(-1, world.getCaveBuffer().getInterpolatedFloor(x, y));
-            setField(ply, "hPosUsed", z);
+            setField(ply, "xPosUsed", Float.valueOf(x));
+            setField(ply, "yPosUsed", Float.valueOf(y));
+            if (ply.getLayer() >= 0) {
+                z = Math.max(-1.0F, world.getNearTerrainBuffer().getInterpolatedHeight(x, y));
+            } else {
+                z = Math.min(-1.0F, world.getCaveBuffer().getInterpolatedFloor(x, y));
+            }
+            setField(ply, "hPosUsed", Float.valueOf(z));
         } catch (Exception e) {
-            consolePrint("Unexpected error while moving - " + e.getMessage());
-            consolePrint( e.toString());
+            consolePrint("Unexpected error while moving - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
     }
 
-    /**
-     * Place the player at the center of the tile and turn the look towards nearest cardinal direction
-     */
     public static void stabilizePlayer() {
         moveToCenter();
         stabilizeLook();
     }
 
-    /**
-     * Turns the look towards nearest cardinal direction
-     */
     public static void stabilizeLook() {
-        try{
-            float xRot = getField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed");
-            xRot = Math.round(xRot/90)*90;
-            setField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed", xRot);
-            setField(WurmHelper.hud.getWorld().getPlayer(), "yRotUsed", (float)0.0);
+        try {
+            float xRot = ((Float)getField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed")).floatValue();
+            xRot = (Math.round(xRot / 90.0F) * 90);
+            setField(WurmHelper.hud.getWorld().getPlayer(), "xRotUsed", Float.valueOf(xRot));
+            setField(WurmHelper.hud.getWorld().getPlayer(), "yRotUsed", Float.valueOf(0.0F));
         } catch (Exception e) {
-            consolePrint("Unexpected error while turning - " + e.getMessage());
+            consolePrint("Unexpected error while turning - " + e.getMessage(), new Object[0]);
         }
     }
 
     public static void moveToCenter() {
-        try{
+        try {
             float x = WurmHelper.hud.getWorld().getPlayerPosX();
             float y = WurmHelper.hud.getWorld().getPlayerPosY();
-            x = (float)(Math.floor((double)x/4)*4 + 2);
-            y = (float)(Math.floor((double)y/4)*4 + 2);
-            setField(WurmHelper.hud.getWorld().getPlayer(), "xPosUsed", x);
-            setField(WurmHelper.hud.getWorld().getPlayer(), "yPosUsed", y);
-
+            x = (float)(Math.floor(x / 4.0D) * 4.0D + 2.0D);
+            y = (float)(Math.floor(y / 4.0D) * 4.0D + 2.0D);
+            setField(WurmHelper.hud.getWorld().getPlayer(), "xPosUsed", Float.valueOf(x));
+            setField(WurmHelper.hud.getWorld().getPlayer(), "yPosUsed", Float.valueOf(y));
         } catch (Exception e) {
-            consolePrint("Unexpected error while moving - " + e.getMessage());
+            consolePrint("Unexpected error while moving - " + e.getMessage(), new Object[0]);
         }
     }
 
@@ -204,18 +182,18 @@ public class Utils {
         try {
             float x = WurmHelper.hud.getWorld().getPlayerPosX();
             float y = WurmHelper.hud.getWorld().getPlayerPosY();
-            x = Math.round(x / 4) * 4;
-            y = Math.round(y / 4) * 4;
-            setField(WurmHelper.hud.getWorld().getPlayer(), "xPosUsed", x);
-            setField(WurmHelper.hud.getWorld().getPlayer(), "yPosUsed", y);
-        } catch(Exception e) {
-            consolePrint("Error on moving to the corner");
+            x = (Math.round(x / 4.0F) * 4);
+            y = (Math.round(y / 4.0F) * 4);
+            setField(WurmHelper.hud.getWorld().getPlayer(), "xPosUsed", Float.valueOf(x));
+            setField(WurmHelper.hud.getWorld().getPlayer(), "yPosUsed", Float.valueOf(y));
+        } catch (Exception e) {
+            consolePrint("Error on moving to the corner", new Object[0]);
         }
     }
 
     public static float itemFavor(InventoryMetaItem item, float c) {
-        float quality = item.getQuality() * (1- item.getDamage()/100);
-        return quality * quality / 500 * c;
+        float quality = item.getQuality() * (1.0F - item.getDamage() / 100.0F);
+        return quality * quality / 500.0F * c;
     }
 
     private static Object getInventoryRootNode(InventoryListComponent ilc) throws NoSuchFieldException, IllegalAccessException {
@@ -224,18 +202,19 @@ public class Utils {
     }
 
     private static List<Object> getNodeChildren(Object node) throws NoSuchFieldException, IllegalAccessException {
-        return new ArrayList<>(getField(node, "children"));
+        return new ArrayList(getField(node, "children"));
     }
 
-    public static List<InventoryMetaItem>  getSelectedItems() {
+    public static List<InventoryMetaItem> getSelectedItems() {
         return getSelectedItems(false, true);
     }
+
     public static List<InventoryMetaItem> getSelectedItems(boolean getAll, boolean recursive) {
         InventoryListComponent ilc = WurmHelper.hud.getInventoryWindow().getInventoryListComponent();
         List<InventoryMetaItem> selItems = new ArrayList<>();
         try {
             Object rootNode = getInventoryRootNode(ilc);
-            List lines = getNodeChildren(rootNode);
+            List<Object> lines = getNodeChildren(rootNode);
             int lineNum = 1;
             int forEachIdx = 0;
             for (Object line : lines) {
@@ -246,40 +225,43 @@ public class Utils {
                 forEachIdx++;
             }
             Object invNode = lines.get(lineNum);
-            List invLines = getNodeChildren(invNode);
-            selItems =  getSelectedItems(invLines, getAll, recursive);
-        } catch(Exception e){
-            consolePrint("Unexpected error while getting selected items - " + e.getMessage());
-            consolePrint(e.toString());
+            List<Object> invLines = getNodeChildren(invNode);
+            selItems = getSelectedItems(invLines, getAll, recursive);
+        } catch (Exception e) {
+            consolePrint("Unexpected error while getting selected items - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
         return selItems;
     }
+
     public static List<InventoryMetaItem> getSelectedItems(InventoryListComponent ilc) {
         return getSelectedItems(ilc, false, true);
     }
+
     public static List<InventoryMetaItem> getSelectedItems(InventoryListComponent ilc, boolean getAll, boolean recursive) {
         List<InventoryMetaItem> selItems = new ArrayList<>();
         try {
             Object rootNode = getInventoryRootNode(ilc);
-            selItems =  getSelectedItems(getNodeChildren(rootNode), getAll, recursive);
-        } catch(Exception e){
-            consolePrint("Unexpected error while getting selected items - " + e.getMessage());
-            consolePrint(e.toString());
+            selItems = getSelectedItems(getNodeChildren(rootNode), getAll, recursive);
+        } catch (Exception e) {
+            consolePrint("Unexpected error while getting selected items - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
         return selItems;
     }
+
     public static List<InventoryMetaItem> getSelectedItems(List nodes, boolean getAll, boolean recursive) {
-        //List<WTreeListNode<InventoryListComponent.InventoryTreeListItem>> nodes
         List<InventoryMetaItem> selItems = new ArrayList<>();
         try {
             for (Object currentNode : nodes) {
-                boolean isSelected = getField(currentNode, "isSelected");
-                List children = getNodeChildren(currentNode);
+                boolean isSelected = ((Boolean)getField(currentNode, "isSelected")).booleanValue();
+                List<Object> children = getNodeChildren(currentNode);
                 Object lineItem = getField(currentNode, "item");
                 InventoryMetaItem item = getField(lineItem, "item");
-                if (item == null) continue;
-                boolean isContainer = getField(lineItem, "isContainer");
-                boolean isInventoryGroup = getField(lineItem, "isInventoryGroup");
+                if (item == null)
+                    continue;
+                boolean isContainer = ((Boolean)getField(lineItem, "isContainer")).booleanValue();
+                boolean isInventoryGroup = ((Boolean)getField(lineItem, "isInventoryGroup")).booleanValue();
                 if (children.size() > 0) {
                     if (isContainer && !isInventoryGroup && (getAll || isSelected)) {
                         Object firstChildrenLineItem = getField(children.get(0), "item");
@@ -288,14 +270,17 @@ public class Utils {
                             selItems.add(item);
                         if (recursive || getAll)
                             selItems.addAll(getSelectedItems(children, true, true));
-                    } else
-                        selItems.addAll(getSelectedItems(children, getAll || isSelected, recursive));
-                } else if (!isInventoryGroup && (getAll || isSelected))
+                        continue;
+                    }
+                    selItems.addAll(getSelectedItems(children, (getAll || isSelected), recursive));
+                    continue;
+                }
+                if (!isInventoryGroup && (getAll || isSelected))
                     selItems.add(item);
             }
-        } catch(Exception e){
-            consolePrint("Unexpected error while getting selected items - " + e.getMessage());
-            consolePrint(e.toString());
+        } catch (Exception e) {
+            consolePrint("Unexpected error while getting selected items - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
         return selItems;
     }
@@ -304,34 +289,27 @@ public class Utils {
         List<InventoryMetaItem> allItems = getSelectedItems(true, true);
         return getInventoryItem(allItems, itemName);
     }
+
     public static InventoryMetaItem getInventoryItem(InventoryListComponent ilc, String itemName) {
         List<InventoryMetaItem> allItems = getSelectedItems(ilc, true, true);
         return getInventoryItem(allItems, itemName);
     }
+
     public static InventoryMetaItem getInventoryItem(List<InventoryMetaItem> items, String itemName) {
         try {
-            if (items == null || items.size() == 0) {
+            if (items == null || items.size() == 0)
                 return null;
-            }
-
-            // first try to find by startsWith 
             for (InventoryMetaItem invItem : items) {
-                if (invItem.getBaseName().startsWith(itemName)) {
+                if (invItem.getBaseName().startsWith(itemName))
                     return invItem;
-                }
             }
-
-            // if not found by startsWith lets try to find by contains
             for (InventoryMetaItem invItem : items) {
-
-                if (invItem.getBaseName().contains(itemName) || itemName.contains("'") && invItem.getDisplayName().contains(itemName.replaceAll("'",""))) {
+                if (invItem.getBaseName().contains(itemName) || (itemName.contains("'") && invItem.getDisplayName().contains(itemName.replaceAll("'", ""))))
                     return invItem;
-                }
             }
-
         } catch (Exception e) {
-            consolePrint("Got error while searching for " + itemName + " in your inventory. Error - " + e.getMessage());
-            consolePrint( e.toString());
+            consolePrint("Got error while searching for " + itemName + " in your inventory. Error - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
         return null;
     }
@@ -340,44 +318,40 @@ public class Utils {
         List<InventoryMetaItem> allItems = getSelectedItems(true, true);
         return getInventoryItems(allItems, itemName);
     }
+
     public static List<InventoryMetaItem> getInventoryItems(InventoryListComponent ilc, String itemName) {
         List<InventoryMetaItem> allItems = getSelectedItems(ilc, true, true);
         return getInventoryItems(allItems, itemName);
     }
+
     public static List<InventoryMetaItem> getInventoryItems(List<InventoryMetaItem> items, String itemName) {
-        return getInventoryItems(
-            items,
-            item ->
-                item.getBaseName().contains(itemName) ||
-                itemName.contains("'") &&
-                item.getDisplayName().contains(itemName.replaceAll("'",""))
-        );
+        return getInventoryItems(items, item ->
+
+                (item.getBaseName().contains(itemName) || (itemName.contains("'") && item.getDisplayName().contains(itemName.replaceAll("'", "")))));
     }
-    
+
     public static List<InventoryMetaItem> getInventoryItems(Predicate<InventoryMetaItem> filter) {
         List<InventoryMetaItem> allItems = getSelectedItems(true, true);
         return getInventoryItems(allItems, filter);
     }
-    
+
     public static List<InventoryMetaItem> getInventoryItems(InventoryListComponent ilc, Predicate<InventoryMetaItem> filter) {
         List<InventoryMetaItem> allItems = getSelectedItems(ilc, true, true);
         return getInventoryItems(allItems, filter);
     }
-    
+
     public static List<InventoryMetaItem> getInventoryItems(List<InventoryMetaItem> items, Predicate<InventoryMetaItem> filter) {
         List<InventoryMetaItem> targets = new ArrayList<>();
         try {
-            if (items == null || items.size() == 0) {
+            if (items == null || items.size() == 0)
                 return targets;
-            }
             for (InventoryMetaItem invItem : items) {
-                if (filter.test(invItem)) {
+                if (filter.test(invItem))
                     targets.add(invItem);
-                }
             }
         } catch (Exception e) {
-            consolePrint("Got error while searching for items: %s", e.getMessage());
-            consolePrint(e.toString());
+            consolePrint("Got error while searching for items: %s", new Object[] { e.getMessage() });
+            consolePrint(e.toString(), new Object[0]);
         }
         return targets;
     }
@@ -385,23 +359,24 @@ public class Utils {
     public static List<InventoryMetaItem> getInventoryItemsAtPoint(int x, int y) {
         return getInventoryItemsAtPoint(WurmHelper.hud.getInventoryWindow().getInventoryListComponent(), x, y);
     }
+
     public static List<InventoryMetaItem> getInventoryItemsAtPoint(InventoryListComponent ilc, int x, int y) {
         List<InventoryMetaItem> itemList = new ArrayList<>();
         try {
             WurmTreeList wtl = getField(ilc, "itemList");
             Method getNodeAt = ReflectionUtil.getMethod(wtl.getClass(), "getNodeAt");
             getNodeAt.setAccessible(true);
-            Object hoveredNode = getNodeAt.invoke(wtl, x, y);
+            Object hoveredNode = getNodeAt.invoke(wtl, new Object[] { Integer.valueOf(x), Integer.valueOf(y) });
             if (hoveredNode != null) {
-                List childLines = getNodeChildren(hoveredNode);
-                itemList = Utils.getSelectedItems(childLines, true, true);
+                List<Object> childLines = getNodeChildren(hoveredNode);
+                itemList = getSelectedItems(childLines, true, true);
                 Object lineItem = getField(hoveredNode, "item");
                 InventoryMetaItem item = getField(lineItem, "item");
-                boolean isContainer = getField(lineItem, "isContainer");
+                boolean isContainer = ((Boolean)getField(lineItem, "isContainer")).booleanValue();
                 if (childLines.size() == 0 || isContainer)
                     itemList.add(item);
             }
-        } catch (NoSuchMethodException | IllegalAccessException | NoSuchFieldException | InvocationTargetException e) {
+        } catch (NoSuchMethodException|IllegalAccessException|NoSuchFieldException|java.lang.reflect.InvocationTargetException e) {
             e.printStackTrace();
         }
         return itemList;
@@ -411,32 +386,28 @@ public class Utils {
         InventoryListComponent ilc = WurmHelper.hud.getInventoryWindow().getInventoryListComponent();
         try {
             Object rootNode = getInventoryRootNode(ilc);
-            List lines = getNodeChildren(rootNode);
+            List<Object> lines = getNodeChildren(rootNode);
             Object nodeLineItem = getField(lines.get(1), "item");
             InventoryMetaItem nodeItem = getField(nodeLineItem, "item");
             return new ArrayList<>(nodeItem.getChildren());
         } catch (Exception e) {
-            Utils.consolePrint("getFirstLevelItems() has encountered an error - " + e.getMessage());
-            Utils.consolePrint( e.toString());
+            consolePrint("getFirstLevelItems() has encountered an error - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
+            return new ArrayList<>();
         }
-        return new ArrayList<>();
     }
-    
+
     public static InventoryMetaItem locateToolItem(String toolName) {
         InventoryListComponent mainInventory = WurmHelper.hud.getInventoryWindow().getInventoryListComponent();
         List<InventoryMetaItem> allItems = getSelectedItems(mainInventory, true, true);
-        Pattern regex = Pattern.compile(String.format("\\b%s\\b", toolName));
-        List<InventoryMetaItem> items = getInventoryItems(
-            allItems,
-            item -> regex.matcher(item.getBaseName()).find()
-        );
-        
+        Pattern regex = Pattern.compile(String.format("\\b%s\\b", new Object[] { toolName }));
+        List<InventoryMetaItem> items = getInventoryItems(allItems, item -> regex.matcher(item.getBaseName()).find());
         if (items.size() == 0) {
-            consolePrint("Error: Couldn't find any tools matching `%s`!", toolName);
+            consolePrint("Error: Couldn't find any tools matching `%s`!", new Object[] { toolName });
             return null;
-        } else if (items.size() > 1)
-            consolePrint("Warning: search for tool `%s` matched %d items", toolName, items.size());
-        
+        }
+        if (items.size() > 1)
+            consolePrint("Warning: search for tool `%s` matched %d items", new Object[] { toolName, Integer.valueOf(items.size()) });
         return items.get(0);
     }
 
@@ -444,101 +415,103 @@ public class Utils {
         try {
             Object listRootItem = getField(ilc, "rootItem");
             return getField(listRootItem, "item");
-        } catch (IllegalAccessException | NoSuchFieldException e) {
+        } catch (IllegalAccessException|NoSuchFieldException e) {
             e.printStackTrace();
+            return null;
         }
-        return null;
     }
 
     public static WurmComponent getTargetComponent(Predicate<WurmComponent> filter) {
-        final int x = WurmHelper.hud.getWorld().getClient().getXMouse();
-        final int y = WurmHelper.hud.getWorld().getClient().getYMouse();
+        int x = WurmHelper.hud.getWorld().getClient().getXMouse();
+        int y = WurmHelper.hud.getWorld().getClient().getYMouse();
         return getComponentAtPoint(x, y, filter);
     }
-    
+
     public static WurmComponent getComponentAtPoint(int x, int y, Predicate<WurmComponent> filter) {
         try {
-            for (int i = 0; i < WurmHelper.getInstance().components.size(); i++) {
-                WurmComponent wurmComponent = WurmHelper.getInstance().components.get(i);
-                if (wurmComponent.contains(x, y)) {
-                    if (filter != null && !filter.test(wurmComponent))
-                        continue;
-                    return wurmComponent;
+            for (int i = 0; i < (WurmHelper.getInstance()).components.size(); ) {
+                WurmComponent wurmComponent = (WurmHelper.getInstance()).components.get(i);
+                if (!wurmComponent.contains(x, y) || (
+                        filter != null && !filter.test(wurmComponent))) {
+                    i++;
+                    continue;
                 }
+                return wurmComponent;
             }
         } catch (Exception e) {
-            Utils.consolePrint("Can't get target component! Error - " + e.getMessage());
-            Utils.consolePrint( e.toString());
+            consolePrint("Can't get target component! Error - " + e.getMessage(), new Object[0]);
+            consolePrint(e.toString(), new Object[0]);
         }
         return null;
     }
-    
+
     public static InventoryListComponent getInventoryForComponent(WurmComponent component) {
-        if(component == null) {
-            Utils.consolePrint("Couldn't find an open container under the cursor");
+        InventoryListComponent invComponent;
+        if (component == null) {
+            consolePrint("Couldn't find an open container under the cursor", new Object[0]);
             return null;
         }
-        
-        InventoryListComponent invComponent;
         try {
             invComponent = getField(component, "component");
-        } catch(Exception err) {
-            Utils.consolePrint("Couldn't get container's ListComponent");
+        } catch (Exception err) {
+            consolePrint("Couldn't get container's ListComponent", new Object[0]);
             err.printStackTrace();
             return null;
         }
-        if(Utils.getRootItem(invComponent) == null) {
-            Utils.consolePrint("Found a ListComponent but it has no root item(?!)");
+        if (getRootItem(invComponent) == null) {
+            consolePrint("Found a ListComponent but it has no root item(?!)", new Object[0]);
             return null;
         }
-        
         return invComponent;
     }
-    
+
     public static InventoryListComponent getTargetInventory() {
-        final int x = WurmHelper.hud.getWorld().getClient().getXMouse();
-        final int y = WurmHelper.hud.getWorld().getClient().getYMouse();
+        int x = WurmHelper.hud.getWorld().getClient().getXMouse();
+        int y = WurmHelper.hud.getWorld().getClient().getYMouse();
         return getInventoryAtPoint(x, y);
     }
-    
+
     public static InventoryListComponent getInventoryAtPoint(int x, int y) {
-        WurmComponent invWindow = Utils.getComponentAtPoint(x, y, c -> c instanceof ItemListWindow || c instanceof InventoryWindow);
-        return invWindow == null ? null : getInventoryForComponent(invWindow);
+        WurmComponent invWindow = getComponentAtPoint(x, y, c -> (c instanceof com.wurmonline.client.renderer.gui.ItemListWindow || c instanceof com.wurmonline.client.renderer.gui.InventoryWindow));
+        return (invWindow == null) ? null : getInventoryForComponent(invWindow);
     }
 
     public static int[][] getAreaCoordinates() {
-        int[][] area = new int[9][2];
+        int m, k, i, area[][] = new int[9][2];
         int x = WurmHelper.hud.getWorld().getPlayerCurrentTileX();
         int y = WurmHelper.hud.getWorld().getPlayerCurrentTileY();
-        int direction = Math.round(WurmHelper.hud.getWorld().getPlayerRotX() / 90);
+        int direction = Math.round(WurmHelper.hud.getWorld().getPlayerRotX() / 90.0F);
         switch (direction) {
             case 1:
-                for (int i = 0; i < 3; i++)
-                    for (int j = 0; j < 3; j++) {
-                        area[i * 3 + j][0] = x + i - 1;
-                        area[i * 3 + j][1] = y + j - 1;
+                for (m = 0; m < 3; m++) {
+                    for (int n = 0; n < 3; n++) {
+                        area[m * 3 + n][0] = x + m - 1;
+                        area[m * 3 + n][1] = y + n - 1;
                     }
-                break;
+                }
+                return area;
             case 2:
-                for (int j = 0; j < 3; j++)
-                    for (int i = 0; i < 3; i++) {
-                        area[j * 3 + i][0] = x - i + 1;
-                        area[j * 3 + i][1] = y + j - 1;
+                for (k = 0; k < 3; k++) {
+                    for (int n = 0; n < 3; n++) {
+                        area[k * 3 + n][0] = x - n + 1;
+                        area[k * 3 + n][1] = y + k - 1;
                     }
-                break;
+                }
+                return area;
             case 3:
-                for (int i = 0; i < 3; i++)
-                    for (int j = 0; j < 3; j++) {
-                        area[i * 3 + j][0] = x - i + 1;
-                        area[i * 3 + j][1] = y - j + 1;
+                for (i = 0; i < 3; i++) {
+                    for (int n = 0; n < 3; n++) {
+                        area[i * 3 + n][0] = x - i + 1;
+                        area[i * 3 + n][1] = y - n + 1;
                     }
-                break;
-            default:
-                for (int j = 0; j < 3; j++)
-                    for (int i = 0; i < 3; i++) {
-                        area[j * 3 + i][0] = x + i - 1;
-                        area[j * 3 + i][1] = y - j + 1;
-                    }
+                }
+                return area;
+        }
+        for (int j = 0; j < 3; j++) {
+            for (int n = 0; n < 3; n++) {
+                area[j * 3 + n][0] = x + n - 1;
+                area[j * 3 + n][1] = y - j + 1;
+            }
         }
         return area;
     }
@@ -551,7 +524,7 @@ public class Utils {
                 String path = url.toString();
                 int pos = path.lastIndexOf('!');
                 if (pos != -1) {
-                    if (r.substring(0,1).equals("/"))
+                    if (r.substring(0, 1).equals("/"))
                         r = r.substring(1);
                     path = path.substring(0, pos) + "!/" + r;
                 }
@@ -571,23 +544,23 @@ public class Utils {
             PaperDollSlot equippedWeightItem = getField(paperDollInventory, "equippedWeightItem");
             InventoryMetaItem inventoryItem = getField(paperDollInventory, "inventoryItem");
             return equippedWeightItem.getWeight() + inventoryItem.getWeight();
-        } catch (IllegalAccessException | NoSuchFieldException e) {
+        } catch (IllegalAccessException|NoSuchFieldException e) {
             e.printStackTrace();
+            return 0.0F;
         }
-        return 0;
     }
+
     public static float getMaxWeight() {
         float bs = SkillLogicSet.getSkill("Body strength").getValue();
-        return bs * 7;
+        return bs * 7.0F;
     }
 
     public static long[] getItemIds(List<InventoryMetaItem> container) {
         if (container == null)
             return null;
         long[] ids = new long[container.size()];
-        for (int i = 0; i < container.size(); i++) {
-            ids[i] = container.get(i).getId();
-        }
+        for (int i = 0; i < container.size(); i++)
+            ids[i] = ((InventoryMetaItem)container.get(i)).getId();
         return ids;
     }
 
@@ -595,15 +568,15 @@ public class Utils {
         MindLogicCalculator mlc;
         try {
             mlc = getField(WurmHelper.hud, "mindLogicCalculator");
-        } catch (IllegalAccessException | NoSuchFieldException e) {
+        } catch (IllegalAccessException|NoSuchFieldException e) {
             e.printStackTrace();
             return 0;
         }
         return mlc.getMaxNumberOfActions();
     }
-    
+
     public static float getPlayerStamina() {
-        final PlayerObj ply = WurmHelper.hud.getWorld().getPlayer();
+        PlayerObj ply = WurmHelper.hud.getWorld().getPlayer();
         return ply.getStamina() + ply.getDamage();
     }
 
@@ -611,164 +584,140 @@ public class Utils {
         try {
             Object consoleComponent = getField(WurmHelper.hud, "consoleComponent");
             Object inputField = getField(consoleComponent, "inputField");
-            Method method = inputField.getClass().getDeclaredMethod("setTextMoveToEnd", String.class);
+            Method method = inputField.getClass().getDeclaredMethod("setTextMoveToEnd", new Class[] { String.class });
             method.setAccessible(true);
-            method.invoke(inputField, s);
-        } catch (IllegalAccessException | NoSuchFieldException | NoSuchMethodException | InvocationTargetException e) {
+            method.invoke(inputField, new Object[] { s });
+        } catch (IllegalAccessException|NoSuchFieldException|NoSuchMethodException|java.lang.reflect.InvocationTargetException e) {
             e.printStackTrace();
         }
     }
-    
-    @FunctionalInterface
-    public static interface ThrowingRunnable {
-        void run() throws Exception;
-    }
-    
+
     public static boolean printExceptions(ThrowingRunnable fn, String fmt, Object... args) {
         try {
             fn.run();
             return true;
         } catch (Exception err) {
             String callingClass = err.getStackTrace()[2].getClassName();
-            Utils.consolePrint(
-                String.format("%s: %s", callingClass, fmt), // preserve format arg numbering
-                err.getClass().getName(),
-                err.getMessage(),
-                args
-            );
+            consolePrint(
+                    String.format("%s: %s", new Object[] { callingClass, fmt }), new Object[] { err
+                            .getClass().getName(), err
+                            .getMessage(), args });
             err.printStackTrace();
             return false;
         }
     }
-    
+
     public static void rethrow(ThrowingRunnable fn) {
-		try {
+        try {
             fn.run();
-        } catch(Exception err) {
+        } catch (Exception err) {
             throw new RuntimeException(err);
         }
-	}
-    
-    @FunctionalInterface
-    public static interface ThrowingProducer<T> {
-        T get() throws Exception;
     }
-    
+
     public static <T> T rethrow(ThrowingProducer<T> fn) {
-		try {
+        try {
             return fn.get();
-        } catch(Exception err) {
+        } catch (Exception err) {
             throw new RuntimeException(err);
         }
-	}
-    
+    }
+
     public static List<CreatureCellRenderable> findCreatures(BiPredicate<CreatureCellRenderable, CreatureData> predicate) {
         List<CreatureCellRenderable> creatures = new ArrayList<>();
         try {
             ServerConnectionListenerClass sscc = WurmHelper.hud.getWorld().getServerConnection().getServerConnectionListener();
             Map<Long, CreatureCellRenderable> creaturesMap = getField(sscc, "creatures");
-            for(CreatureCellRenderable creature: creaturesMap.values()) {
+            for (CreatureCellRenderable creature : creaturesMap.values()) {
                 CreatureData data;
                 try {
                     data = getField(creature, "creature");
                 } catch (Exception e) {
-                    consolePrint(e.toString());
+                    consolePrint(e.toString(), new Object[0]);
                     continue;
                 }
-                
-                if(predicate.test(creature, data))
+                if (predicate.test(creature, data))
                     creatures.add(creature);
             }
         } catch (Exception e) {
-            Utils.consolePrint(e.toString());
+            consolePrint(e.toString(), new Object[0]);
         }
         return creatures;
     }
-    
-    /** Squared distance from player to given object. */
+
     public static float sqdistFromPlayer(CellRenderable obj) {
-        final float px = WurmHelper.hud.getWorld().getPlayerPosX();
-        final float py = WurmHelper.hud.getWorld().getPlayerPosY();
-        return (float)(
-            Math.pow(px - obj.getXPos(), 2f) +
-            Math.pow(py - obj.getYPos(), 2f)
-        );
+        float px = WurmHelper.hud.getWorld().getPlayerPosX();
+        float py = WurmHelper.hud.getWorld().getPlayerPosY();
+        return
+
+                (float)(Math.pow((px - obj.getXPos()), 2.0D) + Math.pow((py - obj.getYPos()), 2.0D));
     }
-    
-    private static final float maxActionSqDistance = 5 * 5;
+
     public static boolean isNearbyPlayer(CellRenderable obj) {
-        return sqdistFromPlayer(obj) < maxActionSqDistance;
+        return (sqdistFromPlayer(obj) < 25.0F);
     }
-    
-    private static final String[] groomableCreatureNames = {
-        "bison",
-        "bull",
-        "calf",
-        "chicken",
-        "cow",
-        "deer",
-        "dog",
-        "foal",
-        "hen",
-        "horse",
-        "lamb",
-        "pig",
-        "ram",
-        "rooster",
-        "sheep",
-        "unicorn",
-    };
+
+    private static final String[] groomableCreatureNames = new String[] {
+            "bison", "bull", "calf", "chicken", "cow", "deer", "dog", "foal", "hen", "horse",
+            "lamb", "pig", "ram", "rooster", "sheep", "unicorn" };
+
     public static boolean isGroomableCreature(CreatureCellRenderable creature) {
-        final String name = creature.getHoverName().toLowerCase();
-        // ignore hell horse, hell chick, etc
-        if(name.contains("hell ")) return false;
-        return Arrays
-            .stream(groomableCreatureNames)
-            .anyMatch(allowed -> name.contains(allowed))
-        ;
+        String name = creature.getHoverName().toLowerCase();
+        if (name.contains("hell "))
+            return false;
+        return
+                Arrays.<String>stream(groomableCreatureNames)
+                        .anyMatch(allowed -> name.contains(allowed));
+    }
+
+    @FunctionalInterface
+    public static interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    @FunctionalInterface
+    public static interface ThrowingProducer<T> {
+        T get() throws Exception;
     }
 
     public static class Cell<T> {
         public T val;
-        public Cell(T val) { this.val = val; }
+
+        public Cell(T val) {
+            this.val = val;
+        }
     }
 
-    public static class Vec2i
-    {
+    public static class Vec2i {
         public int x;
+
         public int y;
-        
-        public Vec2i()
-        {
-            x = 0;
-            y = 0;
+
+        public Vec2i() {
+            this.x = 0;
+            this.y = 0;
         }
-        
-        public Vec2i(int x, int y)
-        {
+
+        public Vec2i(int x, int y) {
             this.x = x;
             this.y = y;
         }
-        
-        @Override
-        public int hashCode()
-        {
-            return 31 * Integer.hashCode(x) + Integer.hashCode(y);
+
+        public int hashCode() {
+            return 31 * Integer.hashCode(this.x) + Integer.hashCode(this.y);
         }
-        
-        @Override
-        public boolean equals(Object obj)
-        {
-            if(this == obj) return true;
-            if(obj == null || !(obj instanceof Vec2i)) return false;
+
+        public boolean equals(Object obj) {
+            if (this == obj)
+                return true;
+            if (obj == null || !(obj instanceof Vec2i))
+                return false;
             Vec2i rhs = (Vec2i)obj;
-            return x == rhs.x && y == rhs.y;
+            return (this.x == rhs.x && this.y == rhs.y);
         }
-        
-        @Override
-        public String toString()
-        {
-            return String.format("Vec2i(%d, %d)", x, y);
+
+        public String toString() {
+            return String.format("Vec2i(%d, %d)", new Object[] { Integer.valueOf(this.x), Integer.valueOf(this.y) });
         }
     }
 }

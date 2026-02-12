@@ -28,8 +28,8 @@ import net.ildar.wurm.Utils.Vec2i;
 import net.ildar.wurm.annotations.BotInfo;
 
 @BotInfo(
-	description = "Investigates tiles and identifies fragments",
-	abbreviation = "ac"
+		description = "Investigates tiles and identifies fragments",
+		abbreviation = "ac"
 )
 public class ArcheoBot extends Bot {
 	static final int identifyChisel = 1201;
@@ -63,15 +63,15 @@ public class ArcheoBot extends Bot {
 		registerInputHandler(InputKey.ct, this::clearIdentifyInventory);
 
 		registerEventProcessor(
-			msg -> {
-				msg = msg.toLowerCase();
-				return
-					msg.contains("the area looks picked clean") ||
-					msg.contains("you pick out a fragment of some item") ||
-					msg.contains("you can't find any traces of any abandoned settlements here")
-				;
-			},
-			() -> investigatingDone = true
+				msg -> {
+					msg = msg.toLowerCase();
+					return
+							msg.contains("the area looks picked clean") ||
+									msg.contains("you pick out a fragment of some item") ||
+									msg.contains("you can't find any traces of any abandoned settlements here")
+							;
+				},
+				() -> investigatingDone = true
 		);
 
 		areaAssistant.setMoveAheadDistance(3);
@@ -94,7 +94,7 @@ public class ArcheoBot extends Bot {
 		List<Vec2i> tilesToBeInvestigated = new ArrayList<>();
 
 		List<InventoryMetaItem> unidentified = new ArrayList<>();
-		
+
 		Map<String, List<InventoryMetaItem>> uncombined = new HashMap<>();
 
 		final int maxActions = Utils.getMaxActionNumber();
@@ -106,8 +106,8 @@ public class ArcheoBot extends Bot {
 
 			if(investigating) {
 				final Vec2i curPos = new Vec2i(
-					WurmHelper.hud.getWorld().getPlayerCurrentTileX(),
-					WurmHelper.hud.getWorld().getPlayerCurrentTileY()
+						WurmHelper.hud.getWorld().getPlayerCurrentTileX(),
+						WurmHelper.hud.getWorld().getPlayerCurrentTileY()
 				);
 				if(tilesToBeInvestigated.isEmpty()) {
 					for(int y = -1; y < 2; y++)
@@ -117,7 +117,7 @@ public class ArcheoBot extends Bot {
 								continue;
 							tilesToBeInvestigated.add(next);
 						}
-					
+
 					if(tilesToBeInvestigated.isEmpty()) {
 						Thread.sleep(1000);
 						areaAssistant.areaNextPosition();
@@ -128,20 +128,20 @@ public class ArcheoBot extends Bot {
 				if(!tilesToBeInvestigated.isEmpty()) {
 					didWork = true;
 					investigatingDone = false;
-					
+
 					final Vec2i tile = tilesToBeInvestigated.get(tilesToBeInvestigated.size() - 1);
 					if(Math.max(Math.abs(tile.x - curPos.x), Math.abs(tile.y - curPos.y)) > 1) {
 						tilesToBeInvestigated.remove(tilesToBeInvestigated.size() - 1);
 					} else {
 						final long tool = useShovel ? shovelId : trowelId;
 						WurmHelper.hud.getWorld().getServerConnection().sendAction(
-							tool,
-							new long[]{Tiles.getTileId(tile.x, tile.y, 0)},
-							PlayerAction.INVESTIGATE
+								tool,
+								new long[]{Tiles.getTileId(tile.x, tile.y, 0)},
+								PlayerAction.INVESTIGATE
 						);
-						
+
 						if(waitActionStarted(() -> investigatingDone))
-						waitActionFinished();
+							waitActionFinished();
 						if(investigatingDone) {
 							tilesToBeInvestigated.remove(tilesToBeInvestigated.size() - 1);
 							tilesInvestigated.add(tile);
@@ -154,13 +154,13 @@ public class ArcheoBot extends Bot {
 				unidentified.clear();
 				for(InventoryListComponent ilc: identifyInventories) {
 					List<InventoryMetaItem> found = Utils.getInventoryItems(
-						ilc,
-						item -> unidentifiedRegex.matcher(item.getDisplayName()).find()
+							ilc,
+							item -> unidentifiedRegex.matcher(item.getDisplayName()).find()
 					);
 					if(found != null)
 						unidentified.addAll(found);
 				}
-				
+
 				Iterator<InventoryMetaItem> iter = unidentified.iterator();
 				boolean anyQueued = false;
 				for(int action = 0; action < maxActions; action++) {
@@ -172,22 +172,22 @@ public class ArcheoBot extends Bot {
 					int improveIcon = fragment.getImproveIconId();
 					if(improveIcon == identifyChisel) {
 						WurmHelper.hud.getWorld().getServerConnection().sendAction(
-							chiselId,
-							new long[]{fragment.getId()},
-							PlayerAction.IDENTIFY
+								chiselId,
+								new long[]{fragment.getId()},
+								PlayerAction.IDENTIFY
 						);
 					} else if(improveIcon == identifyBrush) {
 						WurmHelper.hud.getWorld().getServerConnection().sendAction(
-							brushId,
-							new long[]{fragment.getId()},
-							PlayerAction.IDENTIFY
+								brushId,
+								new long[]{fragment.getId()},
+								PlayerAction.IDENTIFY
 						);
 					} else {
 						Utils.consolePrint("Don't know how to identify fragment `%s`!", fragment.getDisplayName());
 						action--;
 					}
 				}
-				
+
 				if(anyQueued) {
 					didWork = true;
 					if(!waitActionStarted(null))
@@ -199,7 +199,7 @@ public class ArcheoBot extends Bot {
 			if(combining) {
 				uncombined.clear();
 				List<InventoryMetaItem> rawItems = Utils.getInventoryItems(
-					item -> identifiedRegex.matcher(item.getBaseName()).find()
+						item -> identifiedRegex.matcher(item.getBaseName()).find()
 				);
 				for(InventoryMetaItem item: rawItems) {
 					// `ore fragment [1/3], iron` => `iron ore`
@@ -209,7 +209,7 @@ public class ArcheoBot extends Bot {
 					if(material != -1)
 						type = String.join(" ", displayName.substring(material + 2), type);
 					type = type.substring(0, type.indexOf(" fragment"));
-					
+
 					uncombined.compute(type, (k, v) -> {
 						if(v == null) {
 							return new ArrayList<>(Collections.singletonList(item));
@@ -226,19 +226,19 @@ public class ArcheoBot extends Bot {
 						break;
 					if(items.size() < 2)
 						continue;
-					
+
 					InventoryMetaItem head = items.get(0);
 					long[] fragments = items
-						.stream()
-						.skip(1)
-						.map(InventoryMetaItem::getId)
-						.mapToLong(v -> v)
-						.toArray();
+							.stream()
+							.skip(1)
+							.map(InventoryMetaItem::getId)
+							.mapToLong(v -> v)
+							.toArray();
 					actions -= fragments.length;
 					WurmHelper.hud.getWorld().getServerConnection().sendAction(
-						head.getId(),
-						fragments,
-						PlayerAction.COMBINE_FRAGMENT
+							head.getId(),
+							fragments,
+							PlayerAction.COMBINE_FRAGMENT
 					);
 				}
 				if(actions != maxActions) {
@@ -276,18 +276,18 @@ public class ArcheoBot extends Bot {
 
 	void setIdentifyInventory(String[] input) {
 		WurmComponent inventoryComponent = Utils.getTargetComponent(c -> c instanceof ItemListWindow || c instanceof InventoryWindow);
-        if (inventoryComponent == null) {
-            Utils.consolePrint("Couldn't find an inventory under the cursor");
-            return;
-        }
-        InventoryListComponent ilc;
-        try {
-            ilc = Utils.getField(inventoryComponent, "component");
-        } catch(Exception e) {
-            Utils.consolePrint("Unable to get inventory information");
-            return;
-        }
-        identifyInventories.add(ilc);
+		if (inventoryComponent == null) {
+			Utils.consolePrint("Couldn't find an inventory under the cursor");
+			return;
+		}
+		InventoryListComponent ilc;
+		try {
+			ilc = Utils.getField(inventoryComponent, "component");
+		} catch(Exception e) {
+			Utils.consolePrint("Unable to get inventory information");
+			return;
+		}
+		identifyInventories.add(ilc);
 
 		String title;
 		try {
@@ -305,7 +305,7 @@ public class ArcheoBot extends Bot {
 
 	boolean waitActionStarted(Supplier<Boolean> failed) throws Exception {
 		CreationWindow creationWindow = WurmHelper.hud.getCreationWindow();
-        Object progressBar = Utils.getField(creationWindow, "progressBar");
+		Object progressBar = Utils.getField(creationWindow, "progressBar");
 		final long start = System.currentTimeMillis();
 		while(isActive()) {
 			if(failed != null && failed.get()) {
@@ -326,10 +326,10 @@ public class ArcheoBot extends Bot {
 		}
 		return false;
 	}
-	
+
 	void waitActionFinished() throws Exception {
 		CreationWindow creationWindow = WurmHelper.hud.getCreationWindow();
-        Object progressBar = Utils.getField(creationWindow, "progressBar");
+		Object progressBar = Utils.getField(creationWindow, "progressBar");
 		while(isActive()) {
 			float progress = Utils.getField(progressBar, "progress");
 			if(progress == 0f) {
@@ -349,25 +349,25 @@ public class ArcheoBot extends Bot {
 		;
 
 		public String description;
-        public String usage;
-        InputKey(String description, String usage) {
-            this.description = description;
-            this.usage = usage;
-        }
+		public String usage;
+		InputKey(String description, String usage) {
+			this.description = description;
+			this.usage = usage;
+		}
 
-        @Override
-        public String getName() {
-            return name();
-        }
+		@Override
+		public String getName() {
+			return name();
+		}
 
-        @Override
-        public String getDescription() {
-            return description;
-        }
+		@Override
+		public String getDescription() {
+			return description;
+		}
 
-        @Override
-        public String getUsage() {
-            return usage;
-        }
+		@Override
+		public String getUsage() {
+			return usage;
+		}
 	}
 }

@@ -15,6 +15,7 @@ import javassist.CtClass;
 import javassist.CtMethod;
 import javassist.CtNewMethod;
 import net.ildar.wurm.bot.BulkItemGetterBot;
+import net.ildar.wurm.bot.AssistantBot;
 
 import org.gotti.wurmunlimited.modloader.ReflectionUtil;
 import org.gotti.wurmunlimited.modloader.classhooks.HookManager;
@@ -27,6 +28,7 @@ import java.lang.reflect.Method;
 import java.util.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import net.ildar.wurm.bot.Render;
 
 import javax.vecmath.Color3f;
 
@@ -96,7 +98,14 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         }
         return true;
     }
-
+    private static void defrostIfFrozen(CtClass ct) {
+        if (ct == null) return;
+        try {
+            if (ct.isFrozen()) ct.defrost();
+        } catch (Throwable ignored) {
+            // If it can't be defrosted, we'll fail later with a clearer error.
+        }
+    }
     private void handleBotCommand(String[] input) {
         BotController.getInstance().handleInput(input);
     }
@@ -247,7 +256,7 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
                 return;
             }
             CreatureCellRenderable creature = (CreatureCellRenderable)unit;
-            
+
             Utils.consolePrint("Creature `%s`", creature.getHoverName());
             Utils.consolePrint("    ID: %s", creature.getId());
             Utils.consolePrint("    Pos: %s,%s (height %s)", creature.getXPos(), creature.getYPos(), creature.getHPos());
@@ -259,13 +268,13 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         catch(Exception err)
         {
             Utils.consolePrint(
-                "Got %s when trying to print creature info: %s",
-                err.getClass().getName(),
-                err.getMessage()
+                    "Got %s when trying to print creature info: %s",
+                    err.getClass().getName(),
+                    err.getMessage()
             );
         }
     }
-    
+
     private void printItemInfo(InventoryMetaItem item) {
         if (item == null) {
             Utils.consolePrint("Null item");
@@ -282,7 +291,7 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         Utils.consolePrint(" Type:" + item.getType() + " Type bits:" + item.getTypeBits() + " Parent id:" + item.getParentId());
         Utils.consolePrint(" Color override:" + item.isColorOverride() + " Marked for update:" + item.isMarkedForUpdate() + " Unfinished:" + item.isUnfinished());
     }
-    
+
     private void printGroundItemInfo(GroundItemCellRenderable item) {
         GroundItemData data;
         try {
@@ -291,14 +300,14 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
             Utils.consolePrint("Couldn't get GroundItemData for item %s");
             return;
         }
-        
+
         Utils.consolePrint("Ground item \"%s\" (\"%s\") with id %d", data.getName(), data.getHoverText(), item.getId());
         Utils.consolePrint(" Position: %.3f,%.3f (height %.3f) in layer %d", item.getXPos(), item.getYPos(), item.getHPos(), item.getLayer());
         Utils.consolePrint(" Distance from player: %.3fm", item.getLengthFromPlayer());
         Utils.consolePrint(" Color: %d,%d,%d",
-            (int)(255 * data.getR()) & 0xFF,
-            (int)(255 * data.getG()) & 0xFF,
-            (int)(255 * data.getB()) & 0xFF
+                (int)(255 * data.getR()) & 0xFF,
+                (int)(255 * data.getG()) & 0xFF,
+                (int)(255 * data.getB()) & 0xFF
         );
         Utils.consolePrint(" Model name: %s", data.getModelName());
         Utils.consolePrint(" Description: \"%s\"", data.getDescription());
@@ -455,31 +464,31 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         }
         Utils.consolePrint("Didn't find an opened altar");
     }
-    
+
     private void toggleHideMount(String[] args) {
         hideMount = !hideMount;
         Utils.consolePrint(
-            "Mount is now %s",
-            hideMount ? "hidden" : "visible"
+                "Mount is now %s",
+                hideMount ? "hidden" : "visible"
         );
     }
-    
+
     private void toggleHideStructures(String[] args) {
         hideStructures = !hideStructures;
         Utils.consolePrint(
-            "Structures are now %s",
-            hideStructures ? "hidden" : "visible"
+                "Structures are now %s",
+                hideStructures ? "hidden" : "visible"
         );
     }
-    
+
     private void toggleShowCoords(String[] args) {
         showTileCoords = !showTileCoords;
         Utils.consolePrint(
-            "Tile coordinates are now %s",
-            showTileCoords ? "visible" : "hidden"
+                "Tile coordinates are now %s",
+                showTileCoords ? "visible" : "hidden"
         );
     }
-    
+
     public static void addCoordsText(int x, int y, int section, final PickData pickData) {
         String prefix;
         switch(section) {
@@ -515,6 +524,8 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         pickData.addText(String.format("%s%d, %d", prefix, x, y));
     }
 
+    private boolean compassModEnabledOnStartup = true;
+
     @Override
     public void configure(Properties properties) {
         String enableInfoCommands = properties.getProperty("DevInfoCommands", "false");
@@ -524,10 +535,15 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
             consoleCommandHandlers.put(ConsoleCommand.playerinfo, input -> printPlayerInformation());
             consoleCommandHandlers.put(ConsoleCommand.creatureinfo, input -> printCreatureInformation());
         }
-        
+
         String noBlessings = properties.getProperty("NoBlessings", "false");
         this.noBlessings = noBlessings.equalsIgnoreCase("true");
-        
+        String auto = properties.getProperty("autoChangeSeasons", "true");
+        Render.setAutoChangeSeasons("true".equalsIgnoreCase(auto));
+        String compassProp = properties.getProperty("compassmod", "true");
+        compassModEnabledOnStartup = "true".equalsIgnoreCase(compassProp);
+        AssistantBot.setCompassSuppressed(!compassModEnabledOnStartup);
+
         String consoleMsgColor = properties.getProperty("ConsoleMsgColor", "0.5,1.0,1.0");
         try {
             String[] bits = consoleMsgColor.split(",");
@@ -537,8 +553,8 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
             consoleColor = new Color3f(r, g, b);
         } catch(Exception err) {
             Utils.consolePrint(
-                "%s: failed to parse ConsoleMsgColor property, using default",
-                WurmHelper.class.getSimpleName()
+                    "%s: failed to parse ConsoleMsgColor property, using default",
+                    WurmHelper.class.getSimpleName()
             );
         }
     }
@@ -546,71 +562,124 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
     @Override
     public void preInit() {
         try {
+            // Install Render hooks as early as possible so target classes aren't frozen yet.
+            Render.installHooksEarly();
+
             final ClassPool classPool = HookManager.getInstance().getClassPool();
+
+            // Defrost renderable hierarchy up-front. Javassist may need to resolve/compile against these.
+            CtClass ctMobileModelRenderable = classPool.getCtClass("com.wurmonline.client.renderer.cell.MobileModelRenderable");
+            defrostIfFrozen(ctMobileModelRenderable);
+
+            CtClass ctStaticModelRenderable = classPool.getCtClass("com.wurmonline.client.renderer.cell.StaticModelRenderable");
+            defrostIfFrozen(ctStaticModelRenderable);
+
+            CtClass ctCellRenderable = classPool.getCtClass("com.wurmonline.client.renderer.cell.CellRenderable");
+            defrostIfFrozen(ctCellRenderable);
+
+            CtClass ctPlayerAction = classPool.getCtClass("com.wurmonline.shared.constants.PlayerAction");
+            defrostIfFrozen(ctPlayerAction);
+
+            // Existing hook: observe whenever a name is requested (good fallback; catches UI paths)
+            ctPlayerAction.getMethod("getName", "()Ljava/lang/String;").insertBefore(
+                    "try { " +
+                            "net.ildar.wurm.bot.PriestBot.observePlayerActionName(this.name, this.id); " +
+                            "} catch (Throwable ignored) {}"
+            );
+
+            // NEW: more automatic hook — observe when actions are CREATED (covers cases where getName() isn't called)
+            ctPlayerAction.getConstructor("(Ljava/lang/String;SILjava/lang/String;)V").insertAfter(
+                    "try { " +
+                            "net.ildar.wurm.bot.PriestBot.observePlayerActionName(this.name, this.id); " +
+                            "} catch (Throwable ignored) {}"
+            );
+            ctPlayerAction.getConstructor("(SILjava/lang/String;Z)V").insertAfter(
+                    "try { " +
+                            "net.ildar.wurm.bot.PriestBot.observePlayerActionName(this.name, this.id); " +
+                            "} catch (Throwable ignored) {}"
+            );
+
             final CtClass ctWurmConsole = classPool.getCtClass("com.wurmonline.client.console.WurmConsole");
-            ctWurmConsole.getMethod("handleDevInput", "(Ljava/lang/String;[Ljava/lang/String;)Z").insertBefore("if (net.ildar.wurm.WurmHelper.getInstance().handleInput($1,$2)) return true;");
+            defrostIfFrozen(ctWurmConsole);
+            ctWurmConsole.getMethod("handleDevInput", "(Ljava/lang/String;[Ljava/lang/String;)Z")
+                    .insertBefore("if (net.ildar.wurm.WurmHelper.getInstance().handleInput($1,$2)) return true;");
 
             final CtClass ctSocketConnection = classPool.getCtClass("com.wurmonline.communication.SocketConnection");
+            defrostIfFrozen(ctSocketConnection);
             ctSocketConnection.getMethod("tickWriting", "(J)Z").insertBefore("net.ildar.wurm.Utils.serverCallLock.lock();");
             ctSocketConnection.getMethod("tickWriting", "(J)Z").insertAfter("net.ildar.wurm.Utils.serverCallLock.unlock();");
             ctSocketConnection.getMethod("getBuffer", "()Ljava/nio/ByteBuffer;").insertBefore("net.ildar.wurm.Utils.serverCallLock.lock();");
             ctSocketConnection.getMethod("flush", "()V").insertAfter("net.ildar.wurm.Utils.serverCallLock.unlock();");
 
+
             final CtClass ctConsoleComponent = classPool.getCtClass("com.wurmonline.client.renderer.gui.ConsoleComponent");
+            defrostIfFrozen(ctConsoleComponent);
             CtMethod consoleGameTickMethod = CtNewMethod.make(
-                "public void gameTick() {" +
-                "  javax.vecmath.Color3f c = net.ildar.wurm.WurmHelper.consoleColor;" +
-                "  while(!net.ildar.wurm.Utils.consoleMessages.isEmpty()) {" +
-                "    addLine((String)net.ildar.wurm.Utils.consoleMessages.poll(), c.x, c.y, c.z);" +
-                "  }" +
-                "  super.gameTick();" +
-                "};",
-                ctConsoleComponent
+                    "public void gameTick() {" +
+                            "  javax.vecmath.Color3f c = net.ildar.wurm.WurmHelper.consoleColor;" +
+                            "  while(!net.ildar.wurm.Utils.consoleMessages.isEmpty()) {" +
+                            "    addLine((String)net.ildar.wurm.Utils.consoleMessages.poll(), c.x, c.y, c.z);" +
+                            "  }" +
+                            "  super.gameTick();" +
+                            "};",
+                    ctConsoleComponent
             );
             ctConsoleComponent.addMethod(consoleGameTickMethod);
 
             final CtClass ctWurmChat = classPool.getCtClass("com.wurmonline.client.renderer.gui.ChatPanelComponent");
+            defrostIfFrozen(ctWurmChat);
             ctWurmChat.getMethod("addText", "(Ljava/lang/String;Ljava/util/List;Z)V").insertBefore("net.ildar.wurm.Chat.onMessage($1,$2,$3);");
             ctWurmChat.getMethod("addText", "(Ljava/lang/String;Ljava/lang/String;FFFZ)V").insertBefore("net.ildar.wurm.Chat.onMessage($1,$2,$6);");
 
             CtClass itemCellRenderableClass = classPool.getCtClass("com.wurmonline.client.renderer.cell.GroundItemCellRenderable");
-            itemCellRenderableClass.defrost();
-            CtMethod itemCellRenderableInitializeMethod = CtNewMethod.make("public void initialize() {\n" +
-                    "                if (net.ildar.wurm.BotController.getInstance().isInstantiated(net.ildar.wurm.bot.GroundItemGetterBot.class)) {\n" +
-                    "                   net.ildar.wurm.bot.Bot gigBot = net.ildar.wurm.BotController.getInstance().getInstance(net.ildar.wurm.bot.GroundItemGetterBot.class);" +
-                    "                   ((net.ildar.wurm.bot.GroundItemGetterBot)gigBot).processNewItem(this);\n" +
-                    "                }\n" +
-                    "        super.initialize();\n" +
-                    "    };", itemCellRenderableClass);
+            defrostIfFrozen(itemCellRenderableClass);
+
+            CtMethod itemCellRenderableInitializeMethod = CtNewMethod.make(
+                    "public void initialize() {\n" +
+                            "                if (net.ildar.wurm.BotController.getInstance().isInstantiated(net.ildar.wurm.bot.GroundItemGetterBot.class)) {\n" +
+                            "                   net.ildar.wurm.bot.Bot gigBot = net.ildar.wurm.BotController.getInstance().getInstance(net.ildar.wurm.bot.GroundItemGetterBot.class);" +
+                            "                   ((net.ildar.wurm.bot.GroundItemGetterBot)gigBot).processNewItem(this);\n" +
+                            "                }\n" +
+                            "        super.initialize();\n" +
+                            "    };",
+                    itemCellRenderableClass
+            );
             itemCellRenderableClass.addMethod(itemCellRenderableInitializeMethod);
-            
+
             CtClass structureDataClass = classPool.getCtClass("com.wurmonline.client.renderer.structures.StructureData");
+            defrostIfFrozen(structureDataClass);
             structureDataClass.getMethod("isVisible", "(Lcom/wurmonline/client/renderer/Frustum;)Z").insertBefore(
-                "if(net.ildar.wurm.WurmHelper.hideStructures) return false;"
+                    "if(net.ildar.wurm.WurmHelper.hideStructures) return false;"
             );
+
             CtClass meshClass = classPool.getCtClass("com.wurmonline.client.renderer.mesh.Mesh");
+            defrostIfFrozen(meshClass);
             meshClass.getMethod("isVisible", "(Lcom/wurmonline/client/renderer/Frustum;)Z").insertBefore(
-                "if(net.ildar.wurm.WurmHelper.hideStructures) return false;"
+                    "if(net.ildar.wurm.WurmHelper.hideStructures) return false;"
             );
-            
+
             CtClass creatureRenderable = classPool.getCtClass("com.wurmonline.client.renderer.cell.CreatureCellRenderable");
+            defrostIfFrozen(creatureRenderable);
             creatureRenderable.getMethod("isVisible", "(Lcom/wurmonline/client/renderer/Frustum;)Z").insertBefore(
-                "if(net.ildar.wurm.WurmHelper.hideMount && " +
-                "this == net.ildar.wurm.WurmHelper.hud.getWorld().getPlayer().getCarrierCreature())" +
-                "return false;"
+                    "if(net.ildar.wurm.WurmHelper.hideMount && " +
+                            "this == net.ildar.wurm.WurmHelper.hud.getWorld().getPlayer().getCarrierCreature())" +
+                            "return false;"
             );
-            
+
             CtClass tilePicker = classPool.getCtClass("com.wurmonline.client.renderer.TilePicker");
+            defrostIfFrozen(tilePicker);
             tilePicker.getMethod("getHoverDescription", "(Lcom/wurmonline/client/renderer/PickData;)V").insertAfter(
-                "if(net.ildar.wurm.WurmHelper.showTileCoords)" +
-                "  net.ildar.wurm.WurmHelper.addCoordsText(x, y, section, $1);"
+                    "if(net.ildar.wurm.WurmHelper.showTileCoords)" +
+                            "  net.ildar.wurm.WurmHelper.addCoordsText(x, y, section, $1);"
             );
+
             CtClass cavePicker = classPool.getCtClass("com.wurmonline.client.renderer.cave.CaveWallPicker");
+            defrostIfFrozen(cavePicker);
             cavePicker.getMethod("getHoverDescription", "(Lcom/wurmonline/client/renderer/PickData;)V").insertAfter(
-                "final int tilex = (this.wallSide == 4) ? (this.x + 1) : ((this.wallSide == 2) ? (this.x - 1) : this.x);" +
-                "final int tiley = (this.wallSide == 5) ? (this.y + 1) : ((this.wallSide == 3) ? (this.y - 1) : this.y);" +
-                "if(net.ildar.wurm.WurmHelper.showTileCoords)" +
-                "  net.ildar.wurm.WurmHelper.addCoordsText(tilex, tiley, -1 - wallSide, $1);"
+                    "final int tilex = (this.wallSide == 4) ? (this.x + 1) : ((this.wallSide == 2) ? (this.x - 1) : this.x);" +
+                            "final int tiley = (this.wallSide == 5) ? (this.y + 1) : ((this.wallSide == 3) ? (this.y - 1) : this.y);" +
+                            "if(net.ildar.wurm.WurmHelper.showTileCoords)" +
+                            "  net.ildar.wurm.WurmHelper.addCoordsText(tilex, tiley, -1 - wallSide, $1);"
             );
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Error loading mod", e);
@@ -623,27 +692,33 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         try {
             HookManager.getInstance().registerHook("com.wurmonline.client.renderer.gui.HeadsUpDisplay", "init", "(II)V", () -> (proxy, method, args) -> {
                 method.invoke(proxy, args);
-                WurmHelper.hud = (HeadsUpDisplay)proxy;
+                WurmHelper.hud = (HeadsUpDisplay) proxy;
                 return null;
             });
 
+            // Always install hooks, but honor Mod.properties default state via suppression
+            AssistantBot.ensureCompassHooksInstalled();
+            Utils.consolePrint(
+                    "Compass enhancement startup default: %s (set compassmod=true/false in Mod.properties)",
+                    compassModEnabledOnStartup ? "ON" : "OFF"
+            );
+
             HookManager.getInstance().registerHook("com.wurmonline.client.renderer.gui.HeadsUpDisplay", "addComponent", "(Lcom/wurmonline/client/renderer/gui/WurmComponent;)Z", () -> (proxy, method, args) -> {
-                WurmComponent wc = (WurmComponent)args[0];
+                WurmComponent wc = (WurmComponent) args[0];
                 boolean notadd = false;
                 if (BulkItemGetterBot.closeBMLWindow && wc instanceof BmlWindowComponent) {
                     String title = Utils.getField(wc, "title");
                     if (title.equals("Removing items")) {
-                        if(BulkItemGetterBot.moveQuantity > 0)
-                        {
+                        if (BulkItemGetterBot.moveQuantity > 0) {
                             Map<String, Object> inputs = Utils.getField(wc, "inputFields");
                             Object quantityField = inputs.values().iterator().next();
                             Utils.setField(
-                                quantityField,
-                                "input",
-                                String.format("%d", BulkItemGetterBot.moveQuantity)
+                                    quantityField,
+                                    "input",
+                                    String.format("%d", BulkItemGetterBot.moveQuantity)
                             );
                         }
-                        
+
                         Method clickButton = ReflectionUtil.getMethod(wc.getClass(), "processButtonPressed");
                         clickButton.setAccessible(true);
                         clickButton.invoke(wc, "submit");
@@ -656,8 +731,9 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
                     components = new ArrayList<>(Utils.getField(proxy, "components"));
                     return o;
                 }
-                return (Object)true;
+                return (Object) true;
             });
+
             HookManager.getInstance().registerHook("com.wurmonline.client.renderer.gui.HeadsUpDisplay", "setActiveWindow", "(Lcom/wurmonline/client/renderer/gui/WurmComponent;)V", () -> (proxy, method, args) -> {
                 method.invoke(proxy, args);
                 components = new ArrayList<>(Utils.getField(proxy, "components"));
@@ -668,7 +744,7 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
                 try {
                     PickableUnit pickableUnit = Utils.getField(WurmHelper.hud.getSelectBar(), "selectedUnit");
                     if (pickableUnit != null)
-                        WurmHelper.hud.sendAction(new PlayerAction("",(short) 384, PlayerAction.ANYTHING), pickableUnit.getId());
+                        WurmHelper.hud.sendAction(new PlayerAction("", (short) 384, PlayerAction.ANYTHING), pickableUnit.getId());
                 } catch (Exception e) {
                     Utils.consolePrint("Got exception at the start of meditation " + e.getMessage());
                     Utils.consolePrint(e.toString());
@@ -676,8 +752,7 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
             });
 
             logger.info("Loaded");
-        }
-        catch (Exception e) {
+        } catch (Exception e) {
             logger.log(Level.SEVERE, "Error loading mod", e);
             logger.log(Level.SEVERE, e.toString());
         }
@@ -696,7 +771,7 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         bot("abbreviation", "Activates/configures the bot with provided abbreviation."),
         mts("item_name favor_level [coefficient]",
                 "Move specified items to opened altar inventory. " +
-                "The amount of moved items depends on specified favor(with coefficient) you want to get from these items when you sacrifice them."),
+                        "The amount of moved items depends on specified favor(with coefficient) you want to get from these items when you sacrifice them."),
         info("command", "Shows the description of specified console command."),
         iteminfo("", "Prints information about selected items under mouse cursor."),
         tileinfo("", "Prints information about tiles around player"),
@@ -740,25 +815,25 @@ public class WurmHelper implements WurmClientMod, Initable, Configurable, PreIni
         unknown(0),
         north(0),
         n(0),
-        
+
         northeast(45),
         ne(45),
-        
+
         east(90),
         e(90),
-        
+
         southeast(135),
         se(135),
-        
+
         south(180),
         s(180),
-        
+
         southwest(225),
         sw(225),
-        
+
         west(270),
         w(270),
-        
+
         northwest(315),
         nw(315);
 

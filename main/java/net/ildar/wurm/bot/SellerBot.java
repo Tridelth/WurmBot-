@@ -1,6 +1,5 @@
 package net.ildar.wurm.bot;
 
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;

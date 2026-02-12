@@ -1,14 +1,15 @@
 package net.ildar.wurm;
 
 import com.wurmonline.shared.util.MulticolorLineSegment;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 
 public class Chat {
     private static List<MessageProcessor> messageProcessors = new ArrayList<>();
 
-    //On message in tabName: if (filter.apply(message)) callback.run()
     public static MessageProcessor registerMessageProcessor(String tabName, Function<String, Boolean> filter, Runnable callback) {
         MessageProcessor messageProcessor = new MessageProcessor(tabName, filter, callback);
         messageProcessors.add(messageProcessor);
@@ -19,22 +20,24 @@ public class Chat {
         messageProcessors.remove(messageProcessor);
     }
 
-    public static void  onMessage(String context, Object input, boolean silent) {
+    public static void onMessage(String context, Object input, boolean silent) {
         String message;
         if (input instanceof List) {
-            message = pruneMulticolorString((List<MulticolorLineSegment>) input);
-        } else
+            message = pruneMulticolorString((List<MulticolorLineSegment>)input);
+        } else {
             message = (String)input;
+        }
         String messageWithoutTime = message.substring(11).trim();
-        if (messageWithoutTime.isEmpty()) return;
+        if (messageWithoutTime.isEmpty())
+            return;
         messageProcessors.stream()
                 .filter(mp -> Objects.equals(mp.tabName, context))
-                .filter(mp -> mp.filter.apply(message))
+                .filter(mp -> ((Boolean)mp.filter.apply(message)).booleanValue())
                 .forEach(mp -> mp.callback.run());
         switch (context) {
             case ":Combat":
                 if (input instanceof List)
-                    modifyCombatMessage((List<MulticolorLineSegment>) input);
+                    modifyCombatMessage((List<MulticolorLineSegment>)input);
                 break;
         }
     }
@@ -48,7 +51,6 @@ public class Chat {
         return sb.toString();
     }
 
-    //colorizes with blue the part of the message describing the part of your body that your enemy set target to
     private static void modifyCombatMessage(List<MulticolorLineSegment> segments) {
         for (Iterator<MulticolorLineSegment> iter = segments.iterator(); iter.hasNext(); ) {
             MulticolorLineSegment segment = iter.next();
@@ -63,9 +65,11 @@ public class Chat {
         }
     }
 
-    public static class MessageProcessor{
+    public static class MessageProcessor {
         public String tabName;
+
         public Function<String, Boolean> filter;
+
         public Runnable callback;
 
         public MessageProcessor(String tabName, Function<String, Boolean> filter, Runnable callback) {

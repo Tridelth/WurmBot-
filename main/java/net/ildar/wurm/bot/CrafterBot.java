@@ -8,6 +8,7 @@ import net.ildar.wurm.Utils;
 import net.ildar.wurm.annotations.BotInfo;
 import org.gotti.wurmunlimited.modloader.ReflectionUtil;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -16,7 +17,7 @@ import java.util.stream.Collectors;
 
 @BotInfo(description =
         "Automatically does crafting operations using items from crafting window. " +
-        "New crafting operations are not starting until an action queue becomes empty. This behaviour can be disabled. ",
+                "New crafting operations are not starting until an action queue becomes empty. This behaviour can be disabled. ",
         abbreviation = "c")
 public class CrafterBot extends Bot {
     private float staminaThreshold;
@@ -37,6 +38,18 @@ public class CrafterBot extends Bot {
     private long lastClick;
     private boolean singleSourceItemMode;
 
+    private volatile boolean repairInitiated;
+    private long pendingRepairItemId = 0L;
+    private int pendingRepairTries = 0;
+    private long lastPendingRepairTryMs = 0L;
+    private static final int MAX_REPAIR_TRIES = 30;
+    private static final long REPAIR_RETRY_DELAY_MS = 1000L;
+
+    private static final float REPAIR_DAMAGE_THRESHOLD = 1.0f;
+
+    // If a fixed-point pick produces a "ghost" entry, a second read usually resolves it.
+    private static final int FIXED_POINT_EMPTY_SLOT_RETRIES = 2;
+
     public CrafterBot() {
         registerInputHandler(CrafterBot.InputKey.r, input -> toggleRepairInstrument());
         registerInputHandler(CrafterBot.InputKey.st, this::setTargetName);
@@ -53,6 +66,48 @@ public class CrafterBot extends Bot {
         registerInputHandler(CrafterBot.InputKey.an, this::setActionNumber);
         registerInputHandler(CrafterBot.InputKey.noan, input -> toggleActionNumberChecks());
         registerInputHandler(CrafterBot.InputKey.s1s, input -> toggleSingleSourceItemMode());
+
+        registerInputHandler(CrafterBot.InputKey.help, _in -> printCrafterHelp());
+    }
+
+    /**
+     * Prints a concise "bot c help" list to the console.
+     */
+    private void printCrafterHelp() {
+        Utils.consolePrint("==== CrafterBot commands ====");
+        Utils.consolePrint("Usage: bot c <command> [args]");
+        Utils.consolePrint("");
+
+        // Keep order explicit (so output is stable)
+        InputKey[] keys = new InputKey[]{
+                InputKey.r,
+                InputKey.st,
+                InputKey.stxy,
+                InputKey.ss,
+                InputKey.ssxy,
+                InputKey.nosort,
+                InputKey.cs,
+                InputKey.ct,
+                InputKey.ctimeout,
+                InputKey.s,
+                InputKey.u,
+                InputKey.ssid,
+                InputKey.an,
+                InputKey.noan,
+                InputKey.s1s,
+                InputKey.help
+        };
+
+        for (InputKey k : keys) {
+            if (k == null) continue;
+
+            String usage = k.getUsage();
+            String usageSuffix = (usage == null || usage.trim().isEmpty()) ? "" : " " + usage.trim();
+
+            Utils.consolePrint(" - %s%s : %s", k.getName(), usageSuffix, k.getDescription());
+        }
+
+        Utils.consolePrint("");
     }
 
     @Override
@@ -71,6 +126,7 @@ public class CrafterBot extends Bot {
         CreationFrame source = Utils.getField(creationWindow, "source");
         CreationFrame target = Utils.getField(creationWindow, "target");
         registerEventProcessors();
+
         while (isActive()) {
             waitOnPause();
             float stamina = WurmHelper.hud.getWorld().getPlayer().getStamina();
@@ -78,10 +134,38 @@ public class CrafterBot extends Bot {
             float progress = Utils.getField(progressBar, "progress");
 
             if (repairInstrument) {
-                @SuppressWarnings("unchecked")
-                List<InventoryMetaItem> sourceItems = new ArrayList(Utils.getField(source, "itemList"));
-                if (sourceItems != null && sourceItems.size() > 0 && sourceItems.get(0).getDamage() > 10)
-                    WurmHelper.hud.sendAction(PlayerAction.REPAIR, sourceItems.get(0).getId());
+                InventoryMetaItem srcItem = getSourceSlotInventoryItem(source);
+                if (srcItem != null && srcItem.getDamage() > REPAIR_DAMAGE_THRESHOLD) {
+                    long srcId = srcItem.getId();
+
+                    if (pendingRepairItemId != srcId) {
+                        pendingRepairItemId = srcId;
+                        pendingRepairTries = 0;
+                        repairInitiated = false;
+                        lastPendingRepairTryMs = 0L;
+                    }
+
+                    long now = System.currentTimeMillis();
+                    if (!repairInitiated
+                            && pendingRepairTries < MAX_REPAIR_TRIES
+                            && (now - lastPendingRepairTryMs) >= REPAIR_RETRY_DELAY_MS) {
+                        WurmHelper.hud.sendAction(PlayerAction.REPAIR, pendingRepairItemId);
+                        lastPendingRepairTryMs = now;
+                        pendingRepairTries++;
+                    }
+
+                    if (repairInitiated) {
+                        pendingRepairItemId = 0L;
+                        pendingRepairTries = 0;
+                        lastPendingRepairTryMs = 0L;
+                    }
+                } else {
+                    // Nothing to repair (or can't read damage); reset state so we don't loop-repair “nothing”.
+                    pendingRepairItemId = 0L;
+                    pendingRepairTries = 0;
+                    lastPendingRepairTryMs = 0L;
+                    repairInitiated = false;
+                }
             }
 
             if (craftUnfinishedItemMode) {
@@ -128,15 +212,13 @@ public class CrafterBot extends Bot {
             }
 
             if (targetX != 0 && targetY != 0) {
-                List<InventoryMetaItem> items = Utils.getInventoryItemsAtPoint(targetX, targetY);
-                if (items != null && items.size() > 0)
-                    Utils.setField(target, "itemList", items);
+                int tries = isCreationFrameEmpty(target) ? FIXED_POINT_EMPTY_SLOT_RETRIES : 1;
+                setCreationFrameItemsFromPoint(target, targetX, targetY, tries);
             }
 
             if (sourceX != 0 && sourceY != 0) {
-                List<InventoryMetaItem> items = Utils.getInventoryItemsAtPoint(sourceX, sourceY);
-                if (items != null && items.size() > 0)
-                    Utils.setField(source, "itemList", items);
+                int tries = isCreationFrameEmpty(source) ? FIXED_POINT_EMPTY_SLOT_RETRIES : 1;
+                setCreationFrameItemsFromPoint(source, sourceX, sourceY, tries);
             }
 
             if (combineTargets && (Math.abs(lastTargetCombineTime - System.currentTimeMillis()) > combineTimeout)) {
@@ -170,8 +252,103 @@ public class CrafterBot extends Bot {
                     creationWindow.decreaseActionInUse();
                 lastClick = System.currentTimeMillis();
             }
+
             sleep(timeout);
         }
+    }
+
+    private boolean isCreationFrameEmpty(CreationFrame frame) {
+        if (frame == null) return true;
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<InventoryMetaItem> items = (List<InventoryMetaItem>) Utils.getField(frame, "itemList");
+            if (items != null && !items.isEmpty() && items.get(0) != null)
+                return false;
+        } catch (Exception ignored) {
+        }
+
+        // Ground tools placed in slot can be represented separately
+        try {
+            Object gci = Utils.getField(frame, "groundCreationItem");
+            if (gci != null) return false;
+        } catch (Exception ignored) {
+        }
+
+        return true;
+    }
+
+    private void setCreationFrameItemsFromPoint(CreationFrame frame, int x, int y, int tries) {
+        if (frame == null) return;
+        if (tries < 1) tries = 1;
+
+        for (int i = 0; i < tries; i++) {
+            List<InventoryMetaItem> items = Utils.getInventoryItemsAtPoint(x, y);
+            if (items != null && items.size() > 0) {
+                try {
+                    Utils.setField(frame, "itemList", items);
+                } catch (Exception ignored) {
+                }
+                return;
+            }
+        }
+    }
+
+    private InventoryMetaItem getSourceSlotInventoryItem(CreationFrame source) {
+        if (source == null) return null;
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<InventoryMetaItem> sourceItems = (List<InventoryMetaItem>) Utils.getField(source, "itemList");
+            if (sourceItems != null && !sourceItems.isEmpty())
+                return sourceItems.get(0);
+        } catch (Exception ignored) {
+        }
+
+        return null;
+    }
+
+    private long getSourceSlotItemId(CreationFrame source) {
+        if (source == null) return 0L;
+
+        // Works for inventory items / when bot populated the slot
+        try {
+            @SuppressWarnings("unchecked")
+            List<InventoryMetaItem> sourceItems = (List<InventoryMetaItem>) Utils.getField(source, "itemList");
+            if (sourceItems != null && !sourceItems.isEmpty() && sourceItems.get(0) != null)
+                return sourceItems.get(0).getId();
+        } catch (Exception ignored) {
+        }
+
+        // Works for ground tools placed in the slot
+        try {
+            Object gci = Utils.getField(source, "groundCreationItem");
+            if (gci == null) return 0L;
+
+            for (String mName : new String[]{"getId", "getItemId", "getSourceId", "getTargetId"}) {
+                try {
+                    Method m = gci.getClass().getMethod(mName);
+                    Object idObj = m.invoke(gci);
+                    if (idObj instanceof Number)
+                        return ((Number) idObj).longValue();
+                } catch (Exception ignoredInner) {
+                }
+            }
+
+            for (String fName : new String[]{"id", "itemId", "sourceId", "targetId"}) {
+                try {
+                    Field f = gci.getClass().getDeclaredField(fName);
+                    f.setAccessible(true);
+                    Object idObj = f.get(gci);
+                    if (idObj instanceof Number)
+                        return ((Number) idObj).longValue();
+                } catch (Exception ignoredInner) {
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        return 0L;
     }
 
     private void registerEventProcessors() {
@@ -179,6 +356,11 @@ public class CrafterBot extends Bot {
                 || message.contains("you will start creating")
                 || message.contains("You attach")
                 || message.contains("you will start continuing"), () -> lastClick = System.currentTimeMillis());
+
+        registerEventProcessor(message -> message.contains("You repair")
+                || message.contains("You start repairing")
+                || message.contains("doesn't need repairing")
+                || message.contains("you will start repairing"), () -> repairInitiated = true);
     }
 
     private void toggleActionNumberChecks() {
@@ -244,6 +426,11 @@ public class CrafterBot extends Bot {
             Utils.consolePrint("The unfinished item crafting mode is on!");
         } else {
             craftUnfinishedItemMode = false;
+
+            // IMPORTANT: clear any auto-target so we return to "manual / standard" crafting behavior.
+            targetName = null;
+            targetX = targetY = 0;
+
             Utils.consolePrint("The unfinished item crafting mode is off!");
         }
     }
@@ -391,7 +578,8 @@ public class CrafterBot extends Bot {
         an("Set an action number. The number of crafting operations the player will do on each click on continue/create button", "number"),
         noan("Toggles the check for action queue state before the start of each crafting operation. " +
                 "By default " + CrafterBot.class.getSimpleName() + " will check action queue and start crafting operations only when it is empty", ""),
-        s1s("Toggles the setting of single item to source slot of crafting window", "");
+        s1s("Toggles the setting of single item to source slot of crafting window", ""),
+        help("Show this help in the console", "");
 
         private String description;
         private String usage;

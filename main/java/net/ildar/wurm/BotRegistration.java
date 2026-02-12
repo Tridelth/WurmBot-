@@ -1,10 +1,10 @@
 package net.ildar.wurm;
 
-import net.ildar.wurm.bot.Bot;
-
 public class BotRegistration {
     private Class botClass;
+
     private String description;
+
     private String abbreviation;
 
     public BotRegistration(Class botClass, String description, String abbreviation) {
@@ -14,14 +14,14 @@ public class BotRegistration {
     }
 
     public Class getBotClass() {
-        return botClass;
+        return this.botClass;
     }
 
     public String getDescription() {
-        return description;
+        return this.description;
     }
 
     public String getAbbreviation() {
-        return abbreviation;
+        return this.abbreviation;
     }
 }

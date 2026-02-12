@@ -90,9 +90,9 @@ public class BotController {
         bots.forEach(bot -> {
             if((bot instanceof RMIBot))
                 Utils.consolePrint(
-                    "Note: not shutting down %s, use \"%s off\" directly to stop it",
-                    RMIBot.class.getSimpleName(),
-                    getBotRegistration(RMIBot.class).getAbbreviation()
+                        "Note: not shutting down %s, use \"%s off\" directly to stop it",
+                        RMIBot.class.getSimpleName(),
+                        getBotRegistration(RMIBot.class).getAbbreviation()
                 );
             else
                 bot.deactivate();

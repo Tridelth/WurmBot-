@@ -15,7 +15,6 @@ import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
-
 import com.wurmonline.client.comm.ServerConnectionListenerClass;
 import com.wurmonline.client.game.NearTerrainDataBuffer;
 import com.wurmonline.client.game.PlayerObj;
@@ -35,6 +34,8 @@ import com.wurmonline.client.renderer.structures.StructureData;
 import com.wurmonline.math.Vector2f;
 import com.wurmonline.shared.constants.PlayerAction;
 import com.wurmonline.shared.constants.StructureTypeEnum;
+import com.wurmonline.client.renderer.gui.InventoryListComponent;
+import java.lang.reflect.Method;
 
 import net.ildar.wurm.Utils;
 import net.ildar.wurm.WurmHelper;
@@ -97,7 +98,7 @@ public class PathingBot extends Bot
 		}
 		catch(InterruptedException err) { return false; }
 	}
-	
+
 	public PathingBot()
 	{
 		registerInputHandler(Inputs.speed, inPool(this::cmdSpeed));
@@ -106,6 +107,7 @@ public class PathingBot extends Bot
 		registerInputHandler(Inputs.murder, inPool(this::cmdMurder));
 		registerInputHandler(Inputs.groom, inPool(this::cmdGroom));
 		registerInputHandler(Inputs.shear, inPool(this::cmdShear));
+		registerInputHandler(Inputs.catchflies, inPool(this::cmdCatchFlies));
 	}
 	
 	void cmdSpeed(String[] args)
@@ -124,10 +126,10 @@ public class PathingBot extends Bot
 			topSpeedMPS
 		);
 	}
-	
+
 	void enforceNoTasksRunning()
 	{
-		if(walking || following || murdering || grooming)
+		if(walking || following || murdering || grooming || shearing || catchingFlies)
 			throw new RuntimeException("Another task is already enabled");
 	}
 	
@@ -370,7 +372,304 @@ public class PathingBot extends Bot
 		}
 		murdering = false;
 	}
-	
+	boolean catchingFlies = false;
+
+	/**
+	 * More reliable honey counter: scans the whole inventory tree and sums all "honey"
+	 * items whose parentId == jarId.
+	 */
+	private float getHoneyAmountInJarByParentScan(long jarId)
+	{
+		if(jarId <= 0) return 0f;
+
+		try
+		{
+			InventoryListComponent main = WurmHelper.hud.getInventoryWindow().getInventoryListComponent();
+			List<InventoryMetaItem> all = Utils.getSelectedItems(main, true, true); // full inventory tree
+			if(all == null) return 0f;
+
+			float total = 0f;
+			for(InventoryMetaItem it : all)
+			{
+				if(it == null) continue;
+
+				String base = it.getBaseName();
+				if(base == null || !base.equalsIgnoreCase("honey")) continue;
+
+				if(it.getParentId() == jarId)
+					total += it.getWeight(); // grams
+			}
+			return total;
+		}
+		catch(Exception ignored)
+		{
+			return 0f;
+		}
+	}
+
+	private float getHoneyAmountInContainer(InventoryMetaItem container)
+	{
+		if(container == null) return 0f;
+
+		try
+		{
+			List<InventoryMetaItem> children = container.getChildren();
+			if(children == null) return 0f;
+
+			float total = 0f;
+			for(InventoryMetaItem child : children)
+			{
+				if(child == null) continue;
+				String base = child.getBaseName();
+				if(base == null) continue;
+
+				if(base.equalsIgnoreCase("honey"))
+					total += child.getWeight(); // grams
+			}
+			return total;
+		}
+		catch(Exception ignored) { return 0f; }
+	}
+
+	private boolean isPotteryJar(InventoryMetaItem item)
+	{
+		if(item == null) return false;
+		String base = item.getBaseName();
+		return base != null && base.toLowerCase().contains("pottery jar");
+	}
+
+	private Long tryGetItemIdUnderCursor()
+	{
+		try
+		{
+			World world = WurmHelper.hud.getWorld();
+			int x = world.getClient().getXMouse();
+			int y = world.getClient().getYMouse();
+
+			long id = 0L;
+
+			long[] targets = WurmHelper.hud.getCommandTargetsFrom(x, y);
+			if(targets != null && targets.length > 0 && targets[0] > 0)
+				id = targets[0];
+
+			if(id <= 0)
+			{
+				Object hovered = world.getCurrentHoveredObject();
+				if(hovered != null)
+				{
+					Method mid = hovered.getClass().getMethod("getId");
+					Object vid = mid.invoke(hovered);
+					if(vid instanceof Number)
+						id = ((Number)vid).longValue();
+				}
+			}
+
+			return (id > 0) ? id : null;
+		}
+		catch(Exception e)
+		{
+			return null;
+		}
+	}
+
+	private InventoryMetaItem getInventoryItemById(long itemId)
+	{
+		if(itemId <= 0) return null;
+		try
+		{
+			InventoryListComponent main = WurmHelper.hud.getInventoryWindow().getInventoryListComponent();
+			List<InventoryMetaItem> all = Utils.getSelectedItems(main, true, true);
+			if(all == null) return null;
+
+			for(InventoryMetaItem it : all)
+				if(it != null && it.getId() == itemId)
+					return it;
+		}
+		catch(Exception ignored) {}
+		return null;
+	}
+
+	private InventoryMetaItem resolveHoneyJar(float minHoneyGrams)
+	{
+		// 0) Best UX: hover the jar and run the command
+		try
+		{
+			Long hoveredId = tryGetItemIdUnderCursor();
+			if(hoveredId != null && hoveredId > 0)
+			{
+				InventoryMetaItem hoveredItem = getInventoryItemById(hoveredId);
+				if(isPotteryJar(hoveredItem))
+					return hoveredItem;
+			}
+		}
+		catch(Exception ignored) {}
+
+		// 1) Prefer a single selected item
+		try
+		{
+			List<InventoryMetaItem> selected = Utils.getSelectedItems();
+			if(selected != null && selected.size() == 1)
+			{
+				InventoryMetaItem it = selected.get(0);
+				if(isPotteryJar(it))
+					return it;
+			}
+		}
+		catch(Exception ignored) {}
+
+		// 2) Fallback: scan the whole inventory tree and pick the first jar with enough honey
+		try
+		{
+			InventoryListComponent main = WurmHelper.hud.getInventoryWindow().getInventoryListComponent();
+			List<InventoryMetaItem> all = Utils.getSelectedItems(main, true, true);
+			if(all != null)
+			{
+				for(InventoryMetaItem it : all)
+				{
+					if(!isPotteryJar(it)) continue;
+					if(getHoneyAmountInJarByParentScan(it.getId()) > minHoneyGrams)
+						return it;
+				}
+			}
+		}
+		catch(Exception ignored) {}
+
+		return null;
+	}
+
+	void cmdCatchFlies(String[] args)
+	{
+		if(catchingFlies)
+		{
+			catchingFlies = false;
+			return;
+		}
+
+		enforceNoTasksRunning();
+
+		// InventoryMetaItem#getWeight() appears to be in kilograms (UI shows e.g. "1.00"),
+		// so use kg here (0.10 kg == 100 g).
+		final float MIN_HONEY_WEIGHT_KG = 0.10f;
+
+		final InventoryMetaItem jarItem = resolveHoneyJar(MIN_HONEY_WEIGHT_KG);
+		if(jarItem == null)
+		{
+			Utils.consolePrint("Can't find a pottery jar. Hover the jar (recommended) or select it in inventory.");
+			return;
+		}
+
+		float honeyNow = getHoneyAmountInJarByParentScan(jarItem.getId());
+		if(honeyNow <= MIN_HONEY_WEIGHT_KG)
+		{
+			Utils.consolePrint("The jar is out of honey!");
+			return;
+		}
+
+		final PlayerAction CATCH_FLIES = new PlayerAction("Catch flies", (short)938, PlayerAction.ANYTHING);
+
+		CreationWindow creationWindow = WurmHelper.hud.getCreationWindow();
+		Object progressBar = Utils.rethrow(() -> Utils.getField(creationWindow, "progressBar"));
+
+		catchingFlies = true;
+		final HashSet<Long> ignoredCreatures = new HashSet<>();
+		List<CreatureCellRenderable> creatures;
+		final Cell<CreatureCellRenderable> target = new Cell<>(null);
+
+		outer: while(!exiting && catchingFlies)
+		{
+			honeyNow = getHoneyAmountInJarByParentScan(jarItem.getId());
+			if(honeyNow <= MIN_HONEY_WEIGHT_KG)
+			{
+				Utils.consolePrint("The jar is out of honey!");
+				break;
+			}
+
+			if(target.val == null)
+			{
+				creatures = Utils.findCreatures((creature, data) ->
+						!ignoredCreatures.contains(creature.getId()) &&
+								!creature.isItem() &&
+								creature.getKingdomId() == 0 &&
+								!creature.isControlled() &&
+								!creature.getHoverName().startsWith("preserved") &&
+								Utils.isGroomableCreature(creature) &&
+								!petItemRe.matcher(data.getHoverText()).find()
+				);
+				creatures.sort((l, r) -> Float.compare(Utils.sqdistFromPlayer(l), Utils.sqdistFromPlayer(r)));
+
+				target.val = creatures.stream().findFirst().orElse(null);
+				if(target.val == null)
+				{
+					Utils.consolePrint("Can't find any creatures to use Catch flies on");
+					break;
+				}
+			}
+
+			while(Utils.sqdistFromPlayer(target.val) > 4 * 4)
+			{
+				if(exiting || !catchingFlies)
+					break outer;
+
+				final Supplier<Vec2i> targetPos = () -> new Vec2i(
+						(int)(target.val.getXPos() / 4f),
+						(int)(target.val.getYPos() / 4f)
+				);
+				WalkStatus res = walkPath(targetPos);
+				if(res == WalkStatus.noPath)
+				{
+					ignoredCreatures.add(target.val.getId());
+					target.val = null;
+					hud.sendAction(PlayerAction.NO_TARGET, -1);
+					continue outer;
+				}
+				else if(res == WalkStatus.interrupted)
+					continue;
+				break;
+			}
+
+			final long actionSent = System.currentTimeMillis();
+
+			hud.getWorld().getServerConnection().sendAction(
+					jarItem.getId(),
+					new long[]{target.val.getId()},
+					CATCH_FLIES
+			);
+			Utils.consolePrint("Catch flies on `%s`", target.val.getHoverName());
+
+			while(
+					creationWindow.getActionInUse() == 0 &&
+							Utils.rethrow(() -> Utils.<Object, Float>getField(progressBar, "progress")) == 0f
+			)
+			{
+				Utils.rethrow(() -> ForkJoinPool.managedBlock(new SleepBlocker(250)));
+				if(exiting || !catchingFlies) break outer;
+
+				if(System.currentTimeMillis() - actionSent >= 5000)
+				{
+					Utils.consolePrint("Timed out waiting for Catch flies to start");
+					ignoredCreatures.add(target.val.getId());
+					target.val = null;
+					continue outer;
+				}
+			}
+
+			while(
+					Utils.getPlayerStamina() < 0.99 ||
+							creationWindow.getActionInUse() > 0 ||
+							Utils.rethrow(() -> Utils.<Object, Float>getField(progressBar, "progress")) > 0f
+			)
+			{
+				Utils.rethrow(() -> ForkJoinPool.managedBlock(new SleepBlocker(250)));
+				if(exiting || !catchingFlies) break outer;
+			}
+
+			if(target.val != null)
+				ignoredCreatures.add(target.val.getId());
+			target.val = null;
+		}
+
+		catchingFlies = false;
+	}
 	boolean grooming = false;
 	Runnable onGroomingStart = null;
 	Runnable onGroomingDone = null;
@@ -904,7 +1203,7 @@ public class PathingBot extends Bot
 		// Utils.consolePrint("Found path in %.4fms", (endTime - startTime) / 1_000_000.0);
 		return path;
 	}
-	
+
 	static enum Inputs implements Bot.InputKey
 	{
 		speed("Set speed at which bot will move, in km/h", "real"),
@@ -913,6 +1212,7 @@ public class PathingBot extends Bot
 		murder("Find and murder nearby creatures", ""),
 		groom("Find and groom nearby creatures", ""),
 		shear("Find and shear nearby sheep", ""),
+		catchflies("Like groom, but uses an activated pottery jar with >0.1 honey and performs Catch flies (act=938)", ""),
 		;
 		
 		String description;

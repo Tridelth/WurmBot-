@@ -31,7 +31,7 @@ public class MinerBot extends Bot {
     private int clicks = 2;
     private boolean shardsCombining;
     private String shards = "rock shards";
-    private String  fuel = "kindling";
+    private String fuel = "kindling";
     private long fuellingTimeout = 300000;
     private long lastFuelling;
     private boolean moving;
@@ -41,6 +41,9 @@ public class MinerBot extends Bot {
     private boolean noOre;
     private Random random = new Random();
     private Direction direction = Direction.FORWARD;
+
+    // Merged from ProspectorBot: prospect selected tile on demand (once)
+    private boolean prospectRequested;
 
     public MinerBot() {
         registerInputHandler(MinerBot.InputKey.s, this::setStaminaThreshold);
@@ -63,10 +66,13 @@ public class MinerBot extends Bot {
         registerInputHandler(MinerBot.InputKey.sfn, this::setFuelName);
         registerInputHandler(MinerBot.InputKey.v, input -> toggleVerboseMode());
         registerInputHandler(MinerBot.InputKey.dir, this::handleDirectionChange);
+
+        // Prospecting
+        registerInputHandler(MinerBot.InputKey.pr, input -> requestProspectSelectedTile());
     }
 
     @Override
-    public void work() throws Exception{
+    public void work() throws Exception {
         staminaThreshold = 0.96f;
         pickaxe = Utils.locateToolItem("pickaxe");
         if (pickaxe == null) {
@@ -99,8 +105,8 @@ public class MinerBot extends Bot {
                 for (Map.Entry<Long, GroundItemCellRenderable> entry : new HashSet<>(groundItems.entrySet())) {
                     GroundItemCellRenderable groundItem = entry.getValue();
                     GroundItemData groundItemData = Utils.getField(groundItem, "item");
-                    int itemX = (int) (groundItemData.getX()/4);
-                    int itemY = (int) (groundItemData.getY()/4);
+                    int itemX = (int) (groundItemData.getX() / 4);
+                    int itemY = (int) (groundItemData.getY() / 4);
                     if (itemX == tileX && itemY == tileY && groundItem.getHoverName().toLowerCase().contains("pile of ")) {
                         closePileIds.add(groundItem.getId());
                         if (piles.stream().noneMatch(pile -> {
@@ -143,7 +149,8 @@ public class MinerBot extends Bot {
 
                 }
                 if (itemsToTake.size() > 1 && freeSpace < 20) {
-                    if (verbose) Utils.consolePrint("Taking " + itemsToTake.stream().map(InventoryMetaItem::getId).collect(Collectors.toList()));
+                    if (verbose)
+                        Utils.consolePrint("Taking " + itemsToTake.stream().map(InventoryMetaItem::getId).collect(Collectors.toList()));
                     for (InventoryMetaItem item : itemsToTake)
                         WurmHelper.hud.sendAction(PlayerAction.TAKE, item.getId());
                 }
@@ -172,48 +179,58 @@ public class MinerBot extends Bot {
                 boolean actionTaken = false;
                 if (pickaxe.getDamage() > 10)
                     WurmHelper.hud.sendAction(PlayerAction.REPAIR, pickaxe.getId());
-                switch (miningMode) {
-                    case SelectedTile: {
-                        PickableUnit tile = Utils.getField(WurmHelper.hud.getSelectBar(), "selectedUnit");
-                        if (tile != null) {
-                            sendMineActions(tile.getId());
-                            actionTaken = true;
-                        } else
-                            Utils.consolePrint("No target selected!");
-                        break;
-                    }
-                    case Area: {
-                        int area[][] = Utils.getAreaCoordinates();
-                        for (int i = 1; i < area.length; i += 2) {
-                            Tiles.Tile type = WurmHelper.hud.getWorld().getCaveBuffer().getTileType(area[i][0], area[i][1]);
-                            if ((type.tilename.equals("Cave wall") || type.tilename.equals("Rocksalt") || (type.isOreCave() && !noOre))
-                                    && !isErrorTile(area[i][0], area[i][1])) {
-                                sendMineActions(area[i]);
-                                lastTile = area[i];
-                                actionTaken = true;
-                                break;
-                            }
-                            if (i == 7) i = -2;
-                        }
-                        break;
-                    }
-                    case FrontTile: {
-                        int area[][] = Utils.getAreaCoordinates();
-                        Tiles.Tile type = WurmHelper.hud.getWorld().getCaveBuffer().getTileType(area[7][0], area[7][1]);
-                        if ((type.tilename.equals("Cave wall") || type.tilename.equals("Rocksalt") || (type.isOreCave() && !noOre))
-                                && !isErrorTile(area[7][0], area[7][1])) {
-                            sendMineActions(area[7]);
-                            actionTaken = true;
-                            lastTile = area[7];
-                        } else
-                            Utils.consolePrint("Can't mine the tile in front of you");
-                        break;
-                    }
-                    case FixedTile:
-                        sendMineActions(fixedTileId);
-                        actionTaken = true;
-                        break;
+
+                // Prospecting: do it once when requested, then continue normal mining
+                if (prospectRequested) {
+                    actionTaken = prospectSelectedTile();
+                    prospectRequested = false;
                 }
+
+                if (!actionTaken) {
+                    switch (miningMode) {
+                        case SelectedTile: {
+                            PickableUnit tile = Utils.getField(WurmHelper.hud.getSelectBar(), "selectedUnit");
+                            if (tile != null) {
+                                sendMineActions(tile.getId());
+                                actionTaken = true;
+                            } else
+                                Utils.consolePrint("No target selected!");
+                            break;
+                        }
+                        case Area: {
+                            int area[][] = Utils.getAreaCoordinates();
+                            for (int i = 1; i < area.length; i += 2) {
+                                Tiles.Tile type = WurmHelper.hud.getWorld().getCaveBuffer().getTileType(area[i][0], area[i][1]);
+                                if ((type.tilename.equals("Cave wall") || type.tilename.equals("Rocksalt") || (type.isOreCave() && !noOre))
+                                        && !isErrorTile(area[i][0], area[i][1])) {
+                                    sendMineActions(area[i]);
+                                    lastTile = area[i];
+                                    actionTaken = true;
+                                    break;
+                                }
+                                if (i == 7) i = -2;
+                            }
+                            break;
+                        }
+                        case FrontTile: {
+                            int area[][] = Utils.getAreaCoordinates();
+                            Tiles.Tile type = WurmHelper.hud.getWorld().getCaveBuffer().getTileType(area[7][0], area[7][1]);
+                            if ((type.tilename.equals("Cave wall") || type.tilename.equals("Rocksalt") || (type.isOreCave() && !noOre))
+                                    && !isErrorTile(area[7][0], area[7][1])) {
+                                sendMineActions(area[7]);
+                                actionTaken = true;
+                                lastTile = area[7];
+                            } else
+                                Utils.consolePrint("Can't mine the tile in front of you");
+                            break;
+                        }
+                        case FixedTile:
+                            sendMineActions(fixedTileId);
+                            actionTaken = true;
+                            break;
+                    }
+                }
+
                 if ((!actionTaken || Math.abs(lastMining - System.currentTimeMillis()) > 120000) && moving) {
                     int area[][] = Utils.getAreaCoordinates();
                     Tiles.Tile frontTileType = WurmHelper.hud.getWorld().getCaveBuffer().getTileType(area[7][0], area[7][1]);
@@ -291,8 +308,8 @@ public class MinerBot extends Bot {
                         InventoryMetaItem item = Utils.getInventoryItem(fuel);
                         if (item != null)
                             WurmHelper.hud.getWorld().getServerConnection().sendAction(item.getId(),
-                                        new long[]{Utils.getRootItem(smeltingOptions.smelter).getId()},
-                                        new PlayerAction("",(short)117, PlayerAction.ANYTHING));
+                                    new long[]{Utils.getRootItem(smeltingOptions.smelter).getId()},
+                                    new PlayerAction("", (short) 117, PlayerAction.ANYTHING));
                         else
                             Utils.consolePrint("No fuel in inventory!");
                     }
@@ -300,6 +317,39 @@ public class MinerBot extends Bot {
             }
             sleep(timeout);
         }
+    }
+
+    private void requestProspectSelectedTile() {
+        prospectRequested = true;
+        Utils.consolePrint(getClass().getSimpleName() + " will prospect the selected tile once");
+    }
+
+    private boolean prospectSelectedTile() {
+        PickableUnit pickableUnit;
+        try {
+            pickableUnit = Utils.getField(WurmHelper.hud.getSelectBar(), "selectedUnit");
+        } catch (IllegalAccessException | NoSuchFieldException e) {
+            Utils.consolePrint("Error while getting selected tile for prospecting");
+            if (verbose) e.printStackTrace();
+            return false;
+        }
+
+        if (pickableUnit == null) {
+            Utils.consolePrint("Select a cave wall to prospect!");
+            return false;
+        }
+        if (verbose)
+            Utils.consolePrint("Prospecting " + pickableUnit.getHoverName() + " (" + pickableUnit.getId() + ")");
+        sendProspectActions(pickableUnit.getId());
+        return true;
+    }
+
+    private void sendProspectActions(long tileId) {
+        for (int i = 0; i < clicks; i++)
+            WurmHelper.hud.getWorld().getServerConnection().sendAction(
+                    pickaxe.getId(),
+                    new long[]{tileId},
+                    PlayerAction.PROSPECT);
     }
 
     static private boolean isMinableTile(Tiles.Tile type) {
@@ -312,7 +362,7 @@ public class MinerBot extends Bot {
             printCurrentDirection();
             return;
         }
-        
+
         Direction newDirection = Direction.getByAbbreviation(input[0]);
         if (newDirection == Direction.UNKNOWN) {
             printInputKeyUsageString(MinerBot.InputKey.dir);
@@ -329,10 +379,10 @@ public class MinerBot extends Bot {
 
     private void toggleVerboseMode() {
         verbose = !verbose;
-        Utils.consolePrint(getClass().getSimpleName() + " is " + (verbose?"":"not ") + "verbose");
+        Utils.consolePrint(getClass().getSimpleName() + " is " + (verbose ? "" : "not ") + "verbose");
     }
 
-    private void setFuellingTimeout(String [] input) {
+    private void setFuellingTimeout(String[] input) {
         if (input == null || input.length != 1) {
             printInputKeyUsageString(MinerBot.InputKey.sft);
             return;
@@ -345,7 +395,7 @@ public class MinerBot extends Bot {
         }
     }
 
-    private void setFuelName(String []input) {
+    private void setFuelName(String[] input) {
         if (input == null || input.length == 0) {
             printInputKeyUsageString(MinerBot.InputKey.sfn);
             return;
@@ -357,7 +407,7 @@ public class MinerBot extends Bot {
         Utils.consolePrint("New fuel name is " + this.fuel);
     }
 
-    private void addTarget(String []input) {
+    private void addTarget(String[] input) {
         if (input == null || input.length != 1) {
             printInputKeyUsageString(MinerBot.InputKey.at);
             return;
@@ -379,7 +429,7 @@ public class MinerBot extends Bot {
         }
     }
 
-    private void addTargetById(String []input) {
+    private void addTargetById(String[] input) {
         if (input == null || input.length != 2) {
             printInputKeyUsageString(MinerBot.InputKey.atid);
             return;
@@ -387,16 +437,16 @@ public class MinerBot extends Bot {
         try {
             long id = Long.parseLong(input[0]);
             float q = Float.parseFloat(input[1]);
-            smeltingOptions.containers.add(new Pair<>(id,  q));
+            smeltingOptions.containers.add(new Pair<>(id, q));
             smeltingOptions.containers.sort(Comparator.comparingDouble(Pair::getValue));
             Utils.consolePrint("Added a new target with id - " + id +
                     " and minimum quality - " + String.format("%.2f", q));
-        } catch(NumberFormatException e) {
+        } catch (NumberFormatException e) {
             Utils.consolePrint("Invalid values!");
         }
     }
 
-    private void addTargetInventory(String []input) {
+    private void addTargetInventory(String[] input) {
         if (input == null || input.length != 1) {
             printInputKeyUsageString(MinerBot.InputKey.ati);
             return;
@@ -425,8 +475,7 @@ public class MinerBot extends Bot {
         if (moving) {
             Utils.stabilizePlayer();
             Utils.consolePrint(getClass().getSimpleName() + " will automatically moving forward");
-        }
-        else
+        } else
             Utils.consolePrint(getClass().getSimpleName() + " will NOT move automatically");
     }
 
@@ -453,7 +502,7 @@ public class MinerBot extends Bot {
         Utils.consolePrint(getClass().getSimpleName() + " will mine the selected tile");
     }
 
-    private void setClicksNumber(String []input) {
+    private void setClicksNumber(String[] input) {
         if (input == null || input.length != 1) {
             printInputKeyUsageString(MinerBot.InputKey.c);
             return;
@@ -469,7 +518,7 @@ public class MinerBot extends Bot {
         }
     }
 
-    private void setCombiningShardsName(String []input) {
+    private void setCombiningShardsName(String[] input) {
         if (input == null || input.length == 0) {
             printInputKeyUsageString(MinerBot.InputKey.scn);
             return;
@@ -669,7 +718,7 @@ public class MinerBot extends Bot {
         ArrayList<Pair<Long, Float>> containers = new ArrayList<>();
     }
 
-    enum MiningMode{
+    enum MiningMode {
         Unknown,
         SelectedTile,
         Area,
@@ -698,10 +747,12 @@ public class MinerBot extends Bot {
         sft("Set a smelter fuelling timeout for smelting ores", "timeout(in milliseconds)"),
         sfn("Set a name for the fuel for smelting ores", "name"),
         v("Toggle the verbose mode. While verbose bot will show additional info in console", ""),
-        dir("Set mining direction. Possible directions are: f - forward, u - upward, d - downward. Forward is default direction.", "direction");
+        dir("Set mining direction. Possible directions are: f - forward, u - upward, d - downward. Forward is default direction.", "direction"),
+        pr("Prospect currently selected cave wall once (uses current clicks count)", "");
 
         private String description;
         private String usage;
+
         InputKey(String description, String usage) {
             this.description = description;
             this.usage = usage;
@@ -731,14 +782,14 @@ public class MinerBot extends Bot {
 
         String abbreviation;
         PlayerAction action;
-        Direction(String abbreviation, PlayerAction action)
-        {
+
+        Direction(String abbreviation, PlayerAction action) {
             this.abbreviation = abbreviation;
             this.action = action;
         }
 
         static Direction getByAbbreviation(String abbreviation) {
-            for(Direction direction : values())
+            for (Direction direction : values())
                 if (direction.abbreviation.equals(abbreviation))
                     return direction;
             return UNKNOWN;

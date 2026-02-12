@@ -31,6 +31,17 @@ public class ImproverBot extends Bot {
     private boolean groundMode;
     private ToolSkill toolSkill = ToolSkill.UNKNOWN;
 
+    private static final float TOOL_REPAIR_DAMAGE_THRESHOLD = 5.0f;
+
+    // NEW: tools/consumables that should never be repaired (client can freeze)
+    private static final Set<String> NON_REPAIRABLE_TOOL_KEYWORDS =
+            new HashSet<>(Arrays.asList("whetstone", "water", "pelt"));
+
+    private static final float LUMP_QL_MARGIN = 0.0f;
+
+    // NEW: debug logging toggle (command: bot i debug)
+    private boolean debug = false;
+
     @SuppressWarnings("ArraysAsListWithZeroOrOneArgument")
     public ImproverBot() {
         registerInputHandler(ImproverBot.InputKey.s, this::setStaminaThreshold);
@@ -39,6 +50,7 @@ public class ImproverBot extends Bot {
         registerInputHandler(ImproverBot.InputKey.g, this::toggleGroundMode);
         registerInputHandler(ImproverBot.InputKey.ci, input -> changeInstrument());
         registerInputHandler(ImproverBot.InputKey.ss, this::setToolSkill);
+        registerInputHandler(ImproverBot.InputKey.debug, _in -> toggleDebug());
 
         tools.add(new Tool(1201, "carving knife", true, false, new HashSet<>(Arrays.asList(ToolSkill.CARPENTRY))));
         tools.add(new Tool(741, "mallet", true, false, new HashSet<>(Arrays.asList(ToolSkill.CARPENTRY, ToolSkill.LEATHERWORKING))));
@@ -82,7 +94,11 @@ public class ImproverBot extends Bot {
         tools.add(new Tool(638, "'lump, glimmersteel'", false, false, new HashSet<>(Arrays.asList(ToolSkill.BLACKSMITHING))));//glimmersteel
         tools.add(new Tool(639, "'lump, adamantine'", false, false, new HashSet<>(Arrays.asList(ToolSkill.BLACKSMITHING))));//adamantine
         tools.add(new Tool(630, "'lump, seryll'", false, false, new HashSet<>(Arrays.asList(ToolSkill.BLACKSMITHING))));//seryll
+    }
 
+    private void toggleDebug() {
+        debug = !debug;
+        Utils.consolePrint("%s debug=%s", getClass().getSimpleName(), debug);
     }
 
     @Override
@@ -115,11 +131,29 @@ public class ImproverBot extends Bot {
                         sleep(timeout);
                         continue;
                     }
+
+                    if (debug) {
+                        Utils.consolePrint("ImproverBot: selected items=%d", selectedItems.size());
+                        for (InventoryMetaItem it : selectedItems) {
+                            if (it == null) continue;
+                            Utils.consolePrint(
+                                    " - \"%s\" id=%d QL=%.2f DMG=%.2f mat=%d icon=%d",
+                                    it.getBaseName(),
+                                    it.getId(),
+                                    it.getQuality(),
+                                    it.getDamage(),
+                                    (int) it.getMaterialId(),
+                                    it.getImproveIconId()
+                            );
+                        }
+                    }
+
                     selectedItems.sort(Comparator.comparingDouble(item -> item.getQuality() * (1- item.getDamage()/100)));
                     for (InventoryMetaItem itemToImprove : selectedItems) {
                         if (itemToImprove == null || itemToImprove.getImproveIconId() < 0) {
                             continue;
                         }
+
                         Tool tool = findToolForImprove(itemToImprove);
                         if (tool == null) {
                             Utils.consolePrint("Can't find a tool to improve " + itemToImprove.getBaseName() + " " + itemToImprove.getId());
@@ -130,6 +164,47 @@ public class ImproverBot extends Bot {
                             if (!toolItemFound)
                                 continue;
                         }
+
+                        // If tool needs repair, do not block other items
+                        if (!ensureToolRepairedIfNeeded(tool)) {
+                            if (debug) {
+                                Utils.consolePrint(
+                                        "DBG: tool needs repair before improve: tool=%s toolId=%d for itemId=%d",
+                                        tool.name, tool.itemId, itemToImprove.getId()
+                                );
+                            }
+                            continue;
+                        }
+
+                        // Lump QL gating (skip item if lump QL too low)
+                        InventoryMetaItem toolItem = getInventoryItemById(tool.itemId);
+                        if (isMetalLump(tool, toolItem) && toolItem != null) {
+                            float lumpQl = toolItem.getQuality();
+                            float itemQl = itemToImprove.getQuality();
+
+                            if (debug) {
+                                Utils.consolePrint(
+                                        "DBG: lump check: itemId=%d itemQL=%.2f vs lumpId=%d lumpQL=%.2f (%s)",
+                                        itemToImprove.getId(), itemQl,
+                                        toolItem.getId(), lumpQl,
+                                        toolItem.getBaseName()
+                                );
+                            }
+
+                            if (itemQl > (lumpQl + LUMP_QL_MARGIN)) {
+                                if (debug) {
+                                    Utils.consolePrint(
+                                            "Skipping \"%s\" id=%d QL=%.2f (lump QL=%.2f too low)",
+                                            itemToImprove.getBaseName(),
+                                            itemToImprove.getId(),
+                                            itemQl,
+                                            lumpQl
+                                    );
+                                }
+                                continue;
+                            }
+                        }
+
                         if(MaterialUtilities.isMetal(itemToImprove.getMaterialId())){
                             if(itemToImprove.getTemperature()<5) {
                                 Utils.consolePrint("Item \"" + itemToImprove.getBaseName() + "\" isn't hot enough");
@@ -188,12 +263,20 @@ public class ImproverBot extends Bot {
                             if (!toolItemFound)
                                 continue;
                         }
+
+                        // NEW: repair each tool BEFORE using it (if > 5 damage)
+                        if (!ensureToolRepairedIfNeeded(tool)) {
+                            improveInitiated = true;
+                            continue;
+                        }
+
                         improveInitiated = true;
                         WurmHelper.hud.getWorld().getServerConnection().sendAction(tool.itemId,
                                 new long[]{pickableUnit.getId()}, PlayerAction.IMPROVE);
                         sleep(100);
                     }
                 }
+                // wait for improve completion
                 // wait for improve completion
                 if (improveInitiated) {
                     int counter = 0;
@@ -206,6 +289,73 @@ public class ImproverBot extends Bot {
             }
             sleep(timeout);
         }
+    }
+
+    private boolean isMetalLump(Tool tool, InventoryMetaItem toolItem) {
+        if (toolItem == null) return false;
+        if (!MaterialUtilities.isMetal(toolItem.getMaterialId())) return false;
+
+        String n1 = toolItem.getBaseName() == null ? "" : toolItem.getBaseName().toLowerCase(Locale.US);
+        String n2 = tool.name == null ? "" : tool.name.toLowerCase(Locale.US);
+
+        return n1.contains("lump") || n2.contains("lump");
+    }
+
+    // NEW: best-effort tool lookup by id in main inventory (recursive)
+    private InventoryMetaItem getInventoryItemById(long itemId) {
+        if (itemId <= 0) return null;
+        try {
+            InventoryListComponent main = WurmHelper.hud.getInventoryWindow().getInventoryListComponent();
+            List<InventoryMetaItem> all = Utils.getSelectedItems(main, true, true);
+            if (all == null) return null;
+            for (InventoryMetaItem it : all) {
+                if (it != null && it.getId() == itemId) return it;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private boolean isNonRepairableTool(Tool tool, InventoryMetaItem toolItem) {
+        String toolName = (tool != null && tool.name != null) ? tool.name.toLowerCase(Locale.US) : "";
+        String baseName = (toolItem != null && toolItem.getBaseName() != null) ? toolItem.getBaseName().toLowerCase(Locale.US) : "";
+        String displayName = (toolItem != null && toolItem.getDisplayName() != null) ? toolItem.getDisplayName().toLowerCase(Locale.US) : "";
+
+        for (String kw : NON_REPAIRABLE_TOOL_KEYWORDS) {
+            if (kw == null || kw.isEmpty()) continue;
+            if (toolName.contains(kw) || baseName.contains(kw) || displayName.contains(kw))
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * @return true if tool is OK to use now; false if we initiated a repair and should avoid using it this tick
+     */
+    private boolean ensureToolRepairedIfNeeded(Tool tool) {
+        if (tool == null || tool.itemId <= 0) return true;
+
+        InventoryMetaItem toolItem = getInventoryItemById(tool.itemId);
+        if (toolItem == null) return true; // can't read damage; don't block improving
+
+        // IMPORTANT: never repair non-repairable tools/consumables (can freeze client)
+        if (isNonRepairableTool(tool, toolItem)) {
+            if (debug && toolItem.getDamage() > TOOL_REPAIR_DAMAGE_THRESHOLD) {
+                Utils.consolePrint(
+                        "DBG: skipping tool repair (non-repairable): \"%s\" id=%d DMG=%.2f",
+                        toolItem.getBaseName(),
+                        toolItem.getId(),
+                        toolItem.getDamage()
+                );
+            }
+            return true;
+        }
+
+        if (toolItem.getDamage() > TOOL_REPAIR_DAMAGE_THRESHOLD) {
+            WurmHelper.hud.sendAction(PlayerAction.REPAIR, toolItem.getId());
+            return false;
+        }
+        return true;
     }
 
     private List<Tool> getToolsBySkill(ToolSkill toolSkill) {
@@ -265,14 +415,20 @@ public class ImproverBot extends Bot {
         }
         else
             toolItem = Utils.getInventoryItem(WurmHelper.hud.getInventoryWindow().getInventoryListComponent(), tool.name);
+
         if (toolItem == null) {
-            Utils.consolePrint("Can't find an item for a tool \"" + tool.name + "\"");
+            if (debug) {
+                Utils.consolePrint("DBG: Can't find an item for a tool \"%s\"", tool.name);
+            }
             return false;
         }
+
         //check lump heat
-        if(MaterialUtilities.isMetal(toolItem.getMaterialId()) && toolItem.getBaseName().contains("lump")){
-            if(toolItem.getTemperature()<5) {
-                Utils.consolePrint("The \"" + toolItem.getDisplayName() + "\" isn't hot enough");
+        if (MaterialUtilities.isMetal(toolItem.getMaterialId()) && toolItem.getBaseName().contains("lump")) {
+            if (toolItem.getTemperature() < 5) {
+                if (debug) {
+                    Utils.consolePrint("DBG: The \"%s\" isn't hot enough", toolItem.getDisplayName());
+                }
                 return false;
             }
         }
@@ -406,7 +562,8 @@ public class ImproverBot extends Bot {
         ls("List available improving skills", ""),
         ss("Set the skill. Only tools from that skill will be used. You can list available skills using \"" + ls.name() + "\" key", "skill_abbreviation"),
         g("Toggle the ground mode. Set the skill first by \"" + ss.name() + "\" key", ""),
-        ci("Change previously chosen instrument by tool selected in player's inventory", "");
+        ci("Change previously chosen instrument by tool selected in player's inventory", ""),
+        debug("Toggle debug logging", "");
 
         private String description;
         private String usage;

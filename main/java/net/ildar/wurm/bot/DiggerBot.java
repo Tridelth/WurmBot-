@@ -49,6 +49,9 @@ public class DiggerBot extends Bot{
         registerInputHandler(DiggerBot.InputKey.tr, input -> toggleToolRepairing());
         registerInputHandler(DiggerBot.InputKey.sm, input -> toggleSurfaceMining());
 
+        // Help / command list
+        registerInputHandler(DiggerBot.InputKey.help, _in -> printDiggerHelp());
+
         areaAssistant = new AreaAssistant(this);
         areaAssistant.setMoveAheadDistance(1);
         areaAssistant.setMoveRightDistance(2);
@@ -58,11 +61,44 @@ public class DiggerBot extends Bot{
         stepDuration = 1000;
     }
 
+    /**
+     * Prints a concise "bot d help" list to the console.
+     */
+    private void printDiggerHelp() {
+        Utils.consolePrint("==== DiggerBot commands ====");
+        Utils.consolePrint("Usage: bot d <command> [args]");
+        Utils.consolePrint("");
+
+        InputKey[] keys = new InputKey[]{
+                InputKey.s,
+                InputKey.c,
+                InputKey.d,
+                InputKey.dtile,
+                InputKey.dtp,
+                InputKey.l,
+                InputKey.la,
+                InputKey.tr,
+                InputKey.sm,
+                InputKey.help
+        };
+
+        for (InputKey k : keys) {
+            if (k == null) continue;
+
+            String usage = k.getUsage();
+            String usageSuffix = (usage == null || usage.trim().isEmpty()) ? "" : " " + usage.trim();
+
+            Utils.consolePrint(" - %s%s : %s", k.getName(), usageSuffix, k.getDescription());
+        }
+
+        Utils.consolePrint("");
+    }
+
     private void registerEventProcessors() {
         registerEventProcessor(message ->
-                        message.contains("is too steep for your skill level") ||
-                                message.contains("ground is flat here") ||
-                                message.contains("You finish levelling"),
+                message.contains("is too steep for your skill level") ||
+                        message.contains("ground is flat here") ||
+                        message.contains("You finish levelling"),
                 () -> levellingDone = true);
         registerEventProcessor(message -> message.contains("You can not dig in the solid rock") ||
                 message.contains("You hit the rock in a corner") ||
@@ -549,7 +585,8 @@ public class DiggerBot extends Bot{
         l("Toggle the levelling of selected tile", ""),
         la("Toggle the levelling of area around player", "height(in slopes)"),
         tr("Toggle the repairing of the tool", ""),
-        sm("Toggle the surface mining. The bot will do the same but with the pickaxe on the rock", "");
+        sm("Toggle the surface mining. The bot will do the same but with the pickaxe on the rock", ""),
+        help("Show this help in the console", "");
 
         private String description;
         private String usage;
