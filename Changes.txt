@@ -1,0 +1,16 @@
+Added Compassmod to WurmBot ---2000
+Added CustomClientRender to WurmBot---2000
+Added Priestbot
+Added Renderbot 
+Added lists inside each bot ex... bot a list
+changed lumpcombine+lumpheating to only grab max 64 weight to inventory of lumps
+changed repair in crafting bot to repair under 1dmg and repair ground objects ex. large anvil
+added list command to some bots(WIP)
+added priest bot act getting for spellcraft mods (requires you to use statuette right click menu on items to retrieve spell id's)
+cleaned priestbot input
+added queues to priestbot pray function.. accounting for action queues based on player mind logic level
+added improve bot improve tool damage check if > 5 send repair command
+improve bot major update - added logging feature of selected items to compare quality and make improving more efficient and less likely to stall. comparing lump quality to item then skipping over the previous wait if action failed.
+fixed improve bot trying to repair water, whetstone and pelt(causing freeze) + added debug command
+Added bot pt catchflies ... automatic fly catching while inventory has a jar with honey in it (hover over jar in inventory to set jar ##### needs fixing ########
+changed priest bot Add progress-bar based completion for skiller + item casting
