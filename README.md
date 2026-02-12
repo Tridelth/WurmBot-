@@ -19,3 +19,11 @@ Another various things, making the gameplay easier
 You can join the discord channel with this link - https://discord.gg/GpqWrtF There you can send us your suggestions, found bugs and errors. Or just express your support with a couple of warm words
 
 This is my personal modified version of the WurmHelper bot.. use with discretion, I take zero credit from previous iterations
+
+
+-This version of the WurmBot - ClientHelper is not compatible with the following mods because it incorporates them into one mod. Please Disable them before running
+
+- Note, if transitioning from ClientHelper or wurm bot make sure you replace the WurmHelper.properties
+
+-- Improved Compass mod -- 
+-- CustomClientRender --
